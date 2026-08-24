@@ -380,6 +380,27 @@ pre, .wp-block-code {
   margin: 32px 0;
 }
 
+.mc-post-content table, .wp-block-table table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 32px 0;
+  font-size: 15px;
+}
+
+.mc-post-content th, .mc-post-content td, .wp-block-table th, .wp-block-table td {
+  border: 2px solid var(--mc-border);
+  padding: 12px 16px;
+  text-align: left;
+}
+
+.mc-post-content th, .wp-block-table th {
+  background: var(--mc-muted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
 /* Comments Section */
 .mc-comments-section {
   margin-top: 80px;

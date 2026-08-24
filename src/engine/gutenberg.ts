@@ -1,7 +1,7 @@
 import MarkdownIt from "markdown-it";
 
 export const md = new MarkdownIt({
-  html: false,       // ⚠️ SECURITY: Raw HTML disabled to prevent stored XSS
+  html: true,
   linkify: true,
   typographer: true,
   breaks: true
@@ -28,6 +28,36 @@ export function renderInlineMarkdown(text: string): string {
 export function renderFullMarkdown(markdown: string): string {
   if (!markdown) return "";
   return md.render(markdown);
+}
+
+export function renderTableMarkdown(tableLines: string[]): string {
+  if (!tableLines || tableLines.length === 0) return "";
+  const rows = tableLines.map((line) =>
+    line.split("|").slice(1, -1).map((c) => c.trim())
+  );
+  if (rows.length === 0) return "";
+  const hasHeader = rows.length > 1 && rows[1].every((c) => /^:?-+:?$/.test(c));
+  const headerRow = rows[0];
+  const bodyRows = hasHeader ? rows.slice(2) : rows;
+
+  let html = '<figure class="wp-block-table"><table>';
+  if (hasHeader) {
+    html += "<thead><tr>";
+    for (let h = 0; h < headerRow.length; h++) {
+      html += `<th>${renderInlineMarkdown(headerRow[h])}</th>`;
+    }
+    html += "</tr></thead>";
+  }
+  html += "<tbody>";
+  for (let r = 0; r < bodyRows.length; r++) {
+    html += "<tr>";
+    for (let c = 0; c < bodyRows[r].length; c++) {
+      html += `<td>${renderInlineMarkdown(bodyRows[r][c])}</td>`;
+    }
+    html += "</tr>";
+  }
+  html += "</tbody></table></figure>";
+  return html;
 }
 
 export interface ParsedMarkdownBlock {
@@ -127,7 +157,21 @@ export function parseMarkdownToBlocks(markdown: string): ParsedMarkdownBlock[] {
       continue;
     }
 
-    // 5. Unordered List: - item, * item, + item
+    // 5. Table: | col1 | col2 |
+    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith("|") && lines[i].trim().endsWith("|")) {
+        tableLines.push(lines[i].trim());
+        i++;
+      }
+      blocks.push({
+        type: "html",
+        content: renderTableMarkdown(tableLines)
+      });
+      continue;
+    }
+
+    // 6. Unordered List: - item, * item, + item
     if (/^[-*+]\s+/.test(trimmed)) {
       const items: string[] = [];
       while (i < lines.length && /^[-*+]\s+/.test(lines[i].trim())) {
@@ -142,7 +186,7 @@ export function parseMarkdownToBlocks(markdown: string): ParsedMarkdownBlock[] {
       continue;
     }
 
-    // 6. Ordered List: 1. item
+    // 7. Ordered List: 1. item
     if (/^\d+\.\s+/.test(trimmed)) {
       const items: string[] = [];
       while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
@@ -157,7 +201,7 @@ export function parseMarkdownToBlocks(markdown: string): ParsedMarkdownBlock[] {
       continue;
     }
 
-    // 7. Standalone Image: ![alt](url)
+    // 8. Standalone Image: ![alt](url)
     const imgMatch = trimmed.match(/^!\[([^\]]*)\]\(([^)"'\s]+)(?:\s+["']([^"']*)["'])?\)$/);
     if (imgMatch) {
       blocks.push({
@@ -170,7 +214,7 @@ export function parseMarkdownToBlocks(markdown: string): ParsedMarkdownBlock[] {
       continue;
     }
 
-    // 8. Regular Paragraph
+    // 9. Regular Paragraph
     const pLines: string[] = [];
     while (
       i < lines.length &&
@@ -179,6 +223,7 @@ export function parseMarkdownToBlocks(markdown: string): ParsedMarkdownBlock[] {
       !lines[i].trim().startsWith("~~~") &&
       !lines[i].trim().startsWith("#") &&
       !lines[i].trim().startsWith(">") &&
+      !lines[i].trim().startsWith("|") &&
       !/^[-*+]\s+/.test(lines[i].trim()) &&
       !/^\d+\.\s+/.test(lines[i].trim()) &&
       !/^(\-{3,}|\*{3,}|_{3,})$/.test(lines[i].trim()) &&
@@ -243,6 +288,9 @@ export function markdownToGutenberg(markdown: string): string {
       if (b.type === "separator") {
         return `<!-- wp:separator -->\n<hr class="wp-block-separator" />\n<!-- /wp:separator -->`;
       }
+      if (b.type === "html") {
+        return `<!-- wp:html -->\n${b.content || ""}\n<!-- /wp:html -->`;
+      }
       return `<!-- wp:paragraph -->\n<p>${renderInlineMarkdown(b.content || "")}</p>\n<!-- /wp:paragraph -->`;
     })
     .join("\n\n");
@@ -289,13 +337,20 @@ export function parseGutenbergBlocks(content: string): GutenbergBlock[] {
 
     let innerContent = (match[3] || "").trim();
 
-    // Render inline markdown for paragraph, quote, heading blocks if present
+    // Render inline markdown for paragraph, quote, heading, list, code blocks if present
     if (blockName === "paragraph" || blockName === "core/paragraph") {
       innerContent = innerContent.replace(/<p>([\s\S]*?)<\/p>/gi, (_, pInner) => `<p>${renderInlineMarkdown(pInner)}</p>`);
     } else if (blockName === "heading" || blockName === "core/heading") {
       innerContent = innerContent.replace(/<h([1-6])([^>]*)>([\s\S]*?)<\/h\1>/gi, (_, lvl, attrs, hInner) => `<h${lvl}${attrs}>${renderInlineMarkdown(hInner)}</h${lvl}>`);
     } else if (blockName === "quote" || blockName === "core/quote") {
       innerContent = innerContent.replace(/<p>([\s\S]*?)<\/p>/gi, (_, pInner) => `<p>${renderInlineMarkdown(pInner)}</p>`);
+    } else if (blockName === "list" || blockName === "core/list") {
+      innerContent = innerContent.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, liInner) => `<li>${renderInlineMarkdown(liInner)}</li>`);
+    } else if (blockName === "code" || blockName === "core/code") {
+      innerContent = innerContent.replace(/<pre[^>]*><code([^>]*)>([\s\S]*?)<\/code><\/pre>/gi, (_, codeAttrs, rawCode) => {
+        const cleanCode = unescapeHtml(rawCode);
+        return `<pre class="wp-block-code"><code${codeAttrs}>${escapeHtml(cleanCode)}</code></pre>`;
+      });
     }
 
     blocks.push({
@@ -336,13 +391,7 @@ export function parseGutenbergBlocks(content: string): GutenbergBlock[] {
 export function renderGutenbergHtml(content: string): string {
   if (!content) return "";
   if (!content.includes("<!-- wp:")) {
-    return md.render(content)
-      .replace(/<h([1-6])>/g, '<h$1 class="wp-block-heading">')
-      .replace(/<hr\s*\/?>/g, '<hr class="wp-block-separator" />')
-      .replace(/<ul>/g, '<ul class="wp-block-list">')
-      .replace(/<ol>/g, '<ol class="wp-block-list">')
-      .replace(/<blockquote>/g, '<blockquote class="wp-block-quote">')
-      .replace(/<pre><code(?:\s+class="language-([^"]+)")?>/g, '<pre class="wp-block-code"><code class="language-$1">');
+    return renderGutenbergHtml(markdownToGutenberg(content));
   }
 
   const blocks = parseGutenbergBlocks(content);
@@ -354,6 +403,17 @@ export function renderGutenbergHtml(content: string): string {
       return b.innerHTML;
     })
     .join("\n");
+}
+
+function unescapeHtml(str: string): string {
+  if (!str) return "";
+  return str
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&#x27;/g, "'");
 }
 
 function escapeHtml(str: string): string {

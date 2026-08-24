@@ -508,6 +508,25 @@ ${THEME_DARK_CSS}
   max-width: 420px;
   padding: 32px;
 }
+
+.entry-content table, .wp-block-table table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 24px 0;
+  font-size: 14px;
+}
+
+.entry-content th, .entry-content td, .wp-block-table th, .wp-block-table td {
+  border: 1px solid #262c36;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.entry-content th, .wp-block-table th {
+  background: #161a20;
+  color: #f8fafc;
+  font-weight: 600;
+}
   </style>
   ${turnstileSiteKey ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script>` : ""}
 </head>
@@ -1487,37 +1506,74 @@ function renderInlineMarkdown(text) {
     return mdParser.renderInline(text);
   }
   return text
-    .replace(new RegExp('!\\\\\\[([^\\]]*)\\\\\\]\\\\(([^)"\\s\\x27]+)(?:\\\\s+["\\x27]([^"\\x27]*)["\\x27])?\\\\)', 'g'), '<img src="$2" alt="$1" />')
-    .replace(new RegExp('\\\\\\[([^\\]]+)\\\\\\]\\\\(([^)"\\s\\x27]+)(?:\\\\s+["\\x27]([^"\\x27]*)["\\x27])?\\\\)', 'g'), '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
-    .replace(new RegExp('\\x60([^\\x60]+)\\x60', 'g'), '<code>$1</code>')
-    .replace(new RegExp('\\\\*\\\\*([^*]+)\\\\*\\\\*', 'g'), '<strong>$1</strong>')
-    .replace(new RegExp('__([^_]+)__', 'g'), '<strong>$1</strong>')
-    .replace(new RegExp('\\\\*([^*]+)\\\\*', 'g'), '<em>$1</em>')
-    .replace(new RegExp('_([^_]+)_', 'g'), '<em>$1</em>')
-    .replace(new RegExp('~~([^~]+)~~', 'g'), '<del>$1</del>');
+    .replace(/!\\[([^\\]]*)\\]\\(([^)"\\s\\x27]+)(?:\\s+["\\x27]([^"\\x27]*)["\\x27])?\\)/g, '<img src="$2" alt="$1" />')
+    .replace(/\\[([^\\]]+)\\]\\(([^)"\\s\\x27]+)(?:\\s+["\\x27]([^"\\x27]*)["\\x27])?\\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    .replace(/\\x60([^\\x60]+)\\x60/g, '<code>$1</code>')
+    .replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>')
+    .replace(/__([^_]+)__/g, '<strong>$1</strong>')
+    .replace(/\\*([^*]+)\\*/g, '<em>$1</em>')
+    .replace(/_([^_]+)_/g, '<em>$1</em>')
+    .replace(/~~([^~]+)~~/g, '<del>$1</del>');
 }
 
 function renderFullMarkdown(text) {
   if (!text) return '';
   if (mdParser) {
     return mdParser.render(text)
-      .replace(new RegExp('<h([1-6])>', 'g'), '<h$1 class="wp-block-heading">')
-      .replace(new RegExp('<hr\\\\s*/?>', 'g'), '<hr class="wp-block-separator" />')
-      .replace(new RegExp('<ul>', 'g'), '<ul class="wp-block-list">')
-      .replace(new RegExp('<ol>', 'g'), '<ol class="wp-block-list">')
-      .replace(new RegExp('<blockquote>', 'g'), '<blockquote class="wp-block-quote">')
-      .replace(new RegExp('<pre><code(?:\\\\s+class="language-([^"]+)")?>', 'g'), '<pre class="wp-block-code"><code class="language-$1">');
+      .replace(/<h([1-6])>/g, '<h$1 class="wp-block-heading">')
+      .replace(/<hr\\s*\\/?>/g, '<hr class="wp-block-separator" />')
+      .replace(/<ul>/g, '<ul class="wp-block-list">')
+      .replace(/<ol>/g, '<ol class="wp-block-list">')
+      .replace(/<blockquote>/g, '<blockquote class="wp-block-quote">')
+      .replace(/<pre><code(?:\\s+class="language-([^"]+)")?>/g, '<pre class="wp-block-code"><code class="language-$1">');
   }
   return renderInlineMarkdown(escapeHtml(text));
+}
+
+function renderTableMarkdown(tableLines) {
+  if (!tableLines || tableLines.length === 0) return '';
+  var rows = tableLines.map(function(line) {
+    return line.split('|').slice(1, -1).map(function(c) { return c.trim(); });
+  });
+  if (rows.length === 0) return '';
+  var hasHeader = rows.length > 1 && rows[1].every(function(c) { return /^:?-+:?$/.test(c); });
+  var headerRow = rows[0];
+  var bodyRows = hasHeader ? rows.slice(2) : rows;
+
+  var html = '<figure class="wp-block-table"><table>';
+  if (hasHeader) {
+    html += '<thead><tr>';
+    for (var h = 0; h < headerRow.length; h++) {
+      html += '<th>' + renderInlineMarkdown(escapeHtml(headerRow[h])) + '</th>';
+    }
+    html += '</tr></thead>';
+  }
+  html += '<tbody>';
+  for (var r = 0; r < bodyRows.length; r++) {
+    html += '<tr>';
+    for (var c = 0; c < bodyRows[r].length; c++) {
+      html += '<td>' + renderInlineMarkdown(escapeHtml(bodyRows[r][c])) + '</td>';
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table></figure>';
+  return html;
 }
 
 function parseMarkdownToBlocks(markdown) {
   if (!markdown || !markdown.trim()) {
     return [{ type: 'paragraph', content: '' }];
   }
-  var lines = markdown.replace(new RegExp('\\r\\n', 'g'), '\\n').split('\\n');
+  var lines = markdown.replace(/\\r\\n/g, '\\n').split('\\n');
   var blocks = [];
   var i = 0;
+
+  var isSeparator = function(str) { return /^([-]{3,}|[*]{3,}|_{3,})$/.test(str); };
+  var isHeading = function(str) { return /^(#{1,6})\\s+(.+)$/.test(str); };
+  var isUList = function(str) { return /^[-*+]\\s+/.test(str); };
+  var isOList = function(str) { return /^\\d+\\.\\s+/.test(str); };
+  var isTable = function(str) { return str.startsWith('|') && str.endsWith('|'); };
+  var isImage = function(str) { return /^!\\[([^\\]]*)\\]\\(([^)"\\s\\x27]+)(?:\\s+["\\x27]([^"\\x27]*)["\\x27])?\\)$/.test(str); };
 
   while (i < lines.length) {
     var line = lines[i];
@@ -1544,7 +1600,7 @@ function parseMarkdownToBlocks(markdown) {
     }
 
     // 2. Headings
-    var headingMatch = trimmed.match(new RegExp('^(#{1,6})\\s+(.+)$'));
+    var headingMatch = trimmed.match(/^(#{1,6})\\s+(.+)$/);
     if (headingMatch) {
       var level = headingMatch[1].length;
       blocks.push({ type: 'heading', level: level, content: headingMatch[2].trim() });
@@ -1553,7 +1609,7 @@ function parseMarkdownToBlocks(markdown) {
     }
 
     // 3. Separator
-    if (new RegExp('^(\\-{3,}|\\*{3,}|_{3,})$').test(trimmed)) {
+    if (isSeparator(trimmed)) {
       blocks.push({ type: 'separator' });
       i++;
       continue;
@@ -1564,9 +1620,9 @@ function parseMarkdownToBlocks(markdown) {
       var quoteLines = [];
       var cite = '';
       while (i < lines.length && lines[i].trim().startsWith('>')) {
-        var qLine = lines[i].trim().replace(new RegExp('^>\\s?'), '');
+        var qLine = lines[i].trim().replace(/^>\\s?/, '');
         if (qLine.startsWith('——') || qLine.startsWith('--') || qLine.startsWith('- ')) {
-          cite = qLine.replace(new RegExp('^([—\\-]{1,2}\\s?)'), '').trim();
+          cite = qLine.replace(/^([—\\-]{1,2}\\s?)/, '').trim();
         } else {
           quoteLines.push(qLine);
         }
@@ -1576,49 +1632,62 @@ function parseMarkdownToBlocks(markdown) {
       continue;
     }
 
-    // 5. Unordered List
-    if (new RegExp('^[-*+]\\s+').test(trimmed)) {
+    // 5. Table
+    if (isTable(trimmed)) {
+      var tableLines = [];
+      while (i < lines.length && isTable(lines[i].trim())) {
+        tableLines.push(lines[i].trim());
+        i++;
+      }
+      var tableHtml = renderTableMarkdown(tableLines);
+      blocks.push({ type: 'html', content: tableHtml });
+      continue;
+    }
+
+    // 6. Unordered List
+    if (isUList(trimmed)) {
       var uItems = [];
-      while (i < lines.length && new RegExp('^[-*+]\\s+').test(lines[i].trim())) {
-        uItems.push(lines[i].trim().replace(new RegExp('^[-*+]\\s+'), ''));
+      while (i < lines.length && isUList(lines[i].trim())) {
+        uItems.push(lines[i].trim().replace(/^[-*+]\\s+/, ''));
         i++;
       }
       blocks.push({ type: 'list', ordered: false, items: uItems });
       continue;
     }
 
-    // 6. Ordered List
-    if (new RegExp('^\\d+\\.\\s+').test(trimmed)) {
+    // 7. Ordered List
+    if (isOList(trimmed)) {
       var oItems = [];
-      while (i < lines.length && new RegExp('^\\d+\\.\\s+').test(lines[i].trim())) {
-        oItems.push(lines[i].trim().replace(new RegExp('^\\d+\\.\\s+'), ''));
+      while (i < lines.length && isOList(lines[i].trim())) {
+        oItems.push(lines[i].trim().replace(/^\\d+\\.\\s+/, ''));
         i++;
       }
       blocks.push({ type: 'list', ordered: true, items: oItems });
       continue;
     }
 
-    // 7. Standalone image
-    var imgMatch = trimmed.match(new RegExp('^!\\\\\\[([^\\]]*)\\\\\\]\\\\(([^)"\\s\\x27]+)(?:\\\\s+["\\x27]([^"\\x27]*)["\\x27])?\\\\)$'));
+    // 8. Standalone image
+    var imgMatch = trimmed.match(/^!\\[([^\\]]*)\\]\\(([^)"\\s\\x27]+)(?:\\s+["\\x27]([^"\\x27]*)["\\x27])?\\)$/);
     if (imgMatch) {
       blocks.push({ type: 'image', alt: imgMatch[1], url: imgMatch[2], caption: imgMatch[3] || '' });
       i++;
       continue;
     }
 
-    // 8. Regular paragraph
+    // 9. Regular paragraph
     var pLines = [];
     while (
       i < lines.length &&
       lines[i].trim() &&
-      !lines[i].trim().startsWith('\x60\x60\x60') &&
+      !lines[i].trim().startsWith('\\x60\\x60\\x60') &&
       !lines[i].trim().startsWith('~~~') &&
-      !lines[i].trim().startsWith('#') &&
+      !isHeading(lines[i].trim()) &&
       !lines[i].trim().startsWith('>') &&
-      !new RegExp('^[-*+]\\s+').test(lines[i].trim()) &&
-      !new RegExp('^\\d+\\.\\s+').test(lines[i].trim()) &&
-      !new RegExp('^(\\-{3,}|\\*{3,}|_{3,})$').test(lines[i].trim()) &&
-      !new RegExp('^!\\\\\\[([^\\]]*)\\\\\\]\\\\(([^)"\\s\\x27]+)(?:\\\\s+["\\x27]([^"\\x27]*)["\\x27])?\\\\)$').test(lines[i].trim())
+      !isTable(lines[i].trim()) &&
+      !isUList(lines[i].trim()) &&
+      !isOList(lines[i].trim()) &&
+      !isSeparator(lines[i].trim()) &&
+      !isImage(lines[i].trim())
     ) {
       pLines.push(lines[i]);
       i++;
@@ -1644,7 +1713,18 @@ function convertMarkdownTextareaToBlocks() {
   }
   editorBlocks = parseMarkdownToBlocks(raw);
   document.getElementById('post-content-raw').value = blockListToRawGutenberg(editorBlocks);
-  switchEditorMode('visual');
+
+  currentEditorMode = 'visual';
+  ['visual', 'code', 'preview'].forEach(function(m) {
+    const tabBtn = document.getElementById('btn-mode-' + m);
+    const container = document.getElementById('editor-' + m + '-container');
+    if (tabBtn) tabBtn.classList.toggle('active', m === 'visual');
+    if (container) container.style.display = m === 'visual' ? 'block' : 'none';
+  });
+
+  const statusText = document.getElementById('editor-status-text');
+  if (statusText) statusText.innerText = 'Gutenberg 可视化区块排版模式';
+
   renderVisualBlocks();
   alert('已将 Markdown 文本解析并转换为 ' + editorBlocks.length + ' 个可视化区块');
 }
@@ -1656,17 +1736,30 @@ function rawGutenbergToBlockList(raw) {
   if (!raw.includes('<!-- wp:')) {
     return parseMarkdownToBlocks(raw);
   }
-  var regex = new RegExp('<!--\\\\s+wp:([a-z0-9\\\\/-]+)(?:\\\\s+(\\\\{[\\\\s\\\\S]*?\\\\}))?\\\\s+(?:\\\\/-->|-->([\\\\s\\\\S]*?)<!--\\\\s+\\\\/wp:[a-z0-9\\\\/-]+\\\\s+-->)', 'g');
+  var regex = /<!--\\s+wp:([a-z0-9\\/-]+)(?:\\s+(\\{[\\s\\S]*?\\}))?\\s+(?:\\/-->|-->([\\s\\S]*?)<!--\\s+\\/wp:[a-z0-9\\/-]+\\s+-->)/g;
   var blocks = [];
   var lastIdx = 0;
   var match;
 
+  var handleFreeText = function(free) {
+    if (!free) return;
+    if (free.startsWith('<figure') || free.startsWith('<table') || free.startsWith('<div')) {
+      blocks.push({ type: 'html', content: free });
+    } else if (free.startsWith('|') && free.endsWith('|')) {
+      var tableLines = free.split('\\n').map(function(l) { return l.trim(); }).filter(Boolean);
+      blocks.push({ type: 'html', content: renderTableMarkdown(tableLines) });
+    } else {
+      var parsed = parseMarkdownToBlocks(free);
+      for (var p = 0; p < parsed.length; p++) {
+        blocks.push(parsed[p]);
+      }
+    }
+  };
+
   while ((match = regex.exec(raw)) !== null) {
     if (match.index > lastIdx) {
       var free = raw.substring(lastIdx, match.index).trim();
-      if (free) {
-        blocks.push({ type: 'paragraph', content: free.replace(/<\\/?p[^>]*>/gi, '') });
-      }
+      handleFreeText(free);
     }
     var name = match[1].replace('core/', '');
     var attrs = {};
@@ -1681,7 +1774,11 @@ function rawGutenbergToBlockList(raw) {
       blocks.push({ type: 'heading', level: level, content: text });
     } else if (name === 'paragraph') {
       var pText = inner.replace(/<p[^>]*>/gi, '').replace(/<\\/p>/gi, '').trim();
-      blocks.push({ type: 'paragraph', content: pText });
+      if (pText.startsWith('<figure') || pText.startsWith('<table') || pText.startsWith('<div')) {
+        blocks.push({ type: 'html', content: pText });
+      } else {
+        blocks.push({ type: 'paragraph', content: pText });
+      }
     } else if (name === 'image') {
       var srcMatch = inner.match(/src=["']([^"']+)["']/i);
       var altMatch = inner.match(/alt=["']([^"']+)["']/i);
@@ -1706,7 +1803,7 @@ function rawGutenbergToBlockList(raw) {
     } else if (name === 'list') {
       var isOrdered = attrs.ordered || /<ol/i.test(inner);
       var liMatches = [];
-      var liRegex = new RegExp('<li[^>]*>([\\\\s\\\\S]*?)<\\\\/li>', 'gi');
+      var liRegex = /<li[^>]*>([\\s\\S]*?)<\\/li>/gi;
       var m;
       while ((m = liRegex.exec(inner)) !== null) {
         liMatches.push(m[1]);
@@ -1726,9 +1823,7 @@ function rawGutenbergToBlockList(raw) {
 
   if (lastIdx < raw.length) {
     var trailing = raw.substring(lastIdx).trim();
-    if (trailing) {
-      blocks.push({ type: 'paragraph', content: trailing.replace(/<\\/?p[^>]*>/gi, '') });
-    }
+    handleFreeText(trailing);
   }
 
   if (blocks.length === 0) {
@@ -1769,7 +1864,7 @@ function blockListToRawGutenberg(blocks) {
       return '<!-- wp:separator -->\\n<hr class="wp-block-separator" />\\n<!-- /wp:separator -->';
     }
     if (b.type === 'html') {
-      return b.content || '';
+      return '<!-- wp:html -->\\n' + (b.content || '') + '\\n<!-- /wp:html -->';
     }
     return '<!-- wp:paragraph -->\\n<p>' + escapeHtml(b.content || '') + '</p>\\n<!-- /wp:paragraph -->';
   }).join('\\n\\n');
@@ -1980,18 +2075,22 @@ function renderBlocksToPreviewHtml(blocks) {
   var htmls = blocks.map(function(b) {
     if (b.type === 'heading') {
       var lvl = b.level || 2;
-      var headingText = renderInlineMarkdown(escapeHtml(b.content || ''));
+      var headingText = renderInlineMarkdown(b.content || '');
       if (!headingText) return '';
       return '<h' + lvl + ' class="wp-block-heading" style="color:#f8fafc; font-weight:700; margin:1.2em 0 0.6em;">' + headingText + '</h' + lvl + '>';
     }
     if (b.type === 'paragraph') {
-      var pText = renderInlineMarkdown(escapeHtml(b.content || '')).replace(new RegExp('\\n', 'g'), '<br/>');
+      var content = (b.content || '').trim();
+      if (content.startsWith('<figure') || content.startsWith('<table') || content.startsWith('<div')) {
+        return content;
+      }
+      var pText = renderInlineMarkdown(b.content || '').replace(new RegExp('\\n', 'g'), '<br/>');
       if (!pText) return '';
       return '<p class="wp-block-paragraph" style="color:#e2e8f0; line-height:1.8; margin:1em 0;">' + pText + '</p>';
     }
     if (b.type === 'image') {
       if (!b.url) return '';
-      var fig = b.caption ? '<figcaption style="text-align:center; color:#94a3b8; font-size:13px; margin-top:6px;">' + renderInlineMarkdown(escapeHtml(b.caption)) + '</figcaption>' : '';
+      var fig = b.caption ? '<figcaption style="text-align:center; color:#94a3b8; font-size:13px; margin-top:6px;">' + renderInlineMarkdown(b.caption) + '</figcaption>' : '';
       return '<figure class="wp-block-image" style="margin:24px 0; text-align:center;"><img src="' + escapeHtml(b.url) + '" alt="' + escapeHtml(b.alt || '') + '" style="max-width:100%; border-radius:6px;" />' + fig + '</figure>';
     }
     if (b.type === 'code') {
@@ -2000,8 +2099,8 @@ function renderBlocksToPreviewHtml(blocks) {
       return '<pre class="wp-block-code" style="background:#090d14; border:1px solid #1f2735; padding:16px; border-radius:6px; overflow-x:auto; color:#38bdf8; font-family:monospace;"><code' + langClass + '>' + escapeHtml(b.code) + '</code></pre>';
     }
     if (b.type === 'quote') {
-      var qText = renderInlineMarkdown(escapeHtml(b.quote || '')).replace(new RegExp('\\n', 'g'), '<br/>');
-      var cite = b.cite ? '<cite style="display:block; margin-top:8px; color:#94a3b8; font-size:13px; font-style:normal;">' + renderInlineMarkdown(escapeHtml(b.cite)) + '</cite>' : '';
+      var qText = renderInlineMarkdown(b.quote || '').replace(new RegExp('\\n', 'g'), '<br/>');
+      var cite = b.cite ? '<cite style="display:block; margin-top:8px; color:#94a3b8; font-size:13px; font-style:normal;">' + renderInlineMarkdown(b.cite) + '</cite>' : '';
       if (!qText && !cite) return '';
       return '<blockquote class="wp-block-quote" style="border-left:3px solid #38bdf8; padding-left:16px; margin:20px 0; font-style:italic; color:#cbd5e1;"><p style="margin:0;">' + qText + '</p>' + cite + '</blockquote>';
     }
@@ -2009,7 +2108,7 @@ function renderBlocksToPreviewHtml(blocks) {
       var tag = b.ordered ? 'ol' : 'ul';
       var items = (b.items || []).filter(function(it) { return it && it.trim(); });
       if (items.length === 0) return '';
-      var lis = items.map(function(item) { return '<li style="margin-bottom:6px;">' + renderInlineMarkdown(escapeHtml(item)) + '</li>'; }).join('');
+      var lis = items.map(function(item) { return '<li style="margin-bottom:6px;">' + renderInlineMarkdown(item) + '</li>'; }).join('');
       return '<' + tag + ' class="wp-block-list" style="padding-left:24px; margin:16px 0; color:#e2e8f0; line-height:1.7;">' + lis + '</' + tag + '>';
     }
     if (b.type === 'separator') {
@@ -2201,24 +2300,47 @@ async function loadComments() {
   const data = await res.json();
   const tbody = document.getElementById('comments-table-body');
   if (!data.comments || data.comments.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:36px 16px; color:#64748b; background:#10141c;">暂无待审核评论</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:36px 16px; color:#64748b; background:#10141c;">暂无评论记录</td></tr>';
     return;
   }
-  tbody.innerHTML = data.comments.map(c => \`
-    <tr>
-      <td><strong>\${escapeHtml(c.author_name)}</strong><br/><span style="font-size:12px; color:#64748b;">\${escapeHtml(c.author_email)}</span></td>
-      <td style="max-width:360px; word-break:break-word;">\${escapeHtml(c.content).replace(/\\n/g, '<br/>')}</td>
-      <td><span class="badge">\${escapeHtml(c.status)}</span></td>
-      <td>\${c.created_at ? c.created_at.slice(0, 16).replace('T', ' ') : ''}</td>
-      <td>
-        <button class="btn" style="padding:4px 8px; font-size:12px; background:#1e293b; color:#ef4444;" onclick="deleteComment('\${escapeHtml(c.id)}')">删除</button>
-      </td>
-    </tr>
-  \`).join('');
+  tbody.innerHTML = data.comments.map(c => {
+    let badge = '<span class="badge" style="background:#78350f; color:#fbbf24; border:1px solid #d97706;">待审核</span>';
+    if (c.status === 'approved') {
+      badge = '<span class="badge" style="background:#064e3b; color:#34d399; border:1px solid #059669;">已通过</span>';
+    } else if (c.status === 'spam') {
+      badge = '<span class="badge" style="background:#7f1d1d; color:#f87171; border:1px solid #dc2626;">垃圾</span>';
+    }
+    const passBtn = c.status !== 'approved' ? ('<button class="btn" style="padding:4px 8px; font-size:12px; background:#064e3b; color:#34d399;" onclick="setCommentStatus(&quot;' + escapeHtml(c.id) + '&quot;, &quot;approved&quot;)">通过</button>') : '';
+    const pendBtn = c.status !== 'pending' ? ('<button class="btn" style="padding:4px 8px; font-size:12px; background:#78350f; color:#fbbf24;" onclick="setCommentStatus(&quot;' + escapeHtml(c.id) + '&quot;, &quot;pending&quot;)">待审</button>') : '';
+    const spamBtn = c.status !== 'spam' ? ('<button class="btn" style="padding:4px 8px; font-size:12px; background:#451a03; color:#f97316;" onclick="setCommentStatus(&quot;' + escapeHtml(c.id) + '&quot;, &quot;spam&quot;)">垃圾</button>') : '';
+    const delBtn = '<button class="btn" style="padding:4px 8px; font-size:12px; background:#1e293b; color:#ef4444;" onclick="deleteComment(&quot;' + escapeHtml(c.id) + '&quot;)">删除</button>';
+
+    return '<tr>' +
+      '<td><strong>' + escapeHtml(c.author_name) + '</strong><br/><span style="font-size:12px; color:#64748b;">' + escapeHtml(c.author_email) + '</span></td>' +
+      '<td style="max-width:360px; word-break:break-word;">' + escapeHtml(c.content).replace(/\\n/g, '<br/>') + '</td>' +
+      '<td>' + badge + '</td>' +
+      '<td>' + (c.created_at ? c.created_at.slice(0, 16).replace('T', ' ') : '') + '</td>' +
+      '<td><div style="display:flex; gap:6px; flex-wrap:wrap;">' + passBtn + pendBtn + spamBtn + delBtn + '</div></td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function setCommentStatus(id, status) {
+  const res = await fetch('/api/comments/' + id + '/status', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Action': 'true' },
+    body: JSON.stringify({ status })
+  });
+  if (res.ok) {
+    loadComments();
+  } else {
+    const data = await res.json();
+    alert(data.error || '更新评论状态失败');
+  }
 }
 
 async function deleteComment(id) {
-  if (!confirm('确定删除该评论吗？')) return;
+  if (!confirm('确定删除该评论吗？此操作不可恢复。')) return;
   const res = await fetch('/api/comments/' + id, {
     method: 'DELETE',
     headers: { 'X-Admin-Action': 'true' }

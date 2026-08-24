@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { HonoEnv } from "../types/env";
 import { verifyTurnstileToken } from "../auth/turnstile";
-import { requireAuth, requireRole } from "../middleware/auth-guard";
+import { requireAuth, requireRole, extractToken, isTokenVersionValid } from "../middleware/auth-guard";
+import { verifyJWT } from "../auth/session";
 import { rateLimit } from "../middleware/rate-limiter";
 import { sendCommentNotificationEmail } from "../services/email";
 
@@ -59,13 +60,27 @@ apiCommentsRoutes.post(
       return c.json({ error: "关联文章不存在" }, 404);
     }
 
+    // 4. Determine comment status:
+    // Admins and authors are auto-approved; anonymous/readers require moderation (status: "pending")
+    let commentStatus: "approved" | "pending" = "pending";
+    const token = extractToken(c);
+    if (token && c.env.JWT_SECRET) {
+      const payload = await verifyJWT(token, c.env.JWT_SECRET);
+      if (payload && (payload.role === "administrator" || payload.role === "author")) {
+        const isVerValid = await isTokenVersionValid(c, payload.id, payload.token_version);
+        if (isVerValid) {
+          commentStatus = "approved";
+        }
+      }
+    }
+
     const comment = await (blogDO as any).createComment({
       post_id,
       parent_id: parent_id || null,
       author_name: cleanAuthor,
       author_email: cleanEmail,
       content: cleanContent,
-      status: "approved"
+      status: commentStatus
     });
 
     // Asynchronous Throttled Email Notification Loop
@@ -89,7 +104,8 @@ apiCommentsRoutes.post(
       );
     }
 
-    return c.json({ success: true, comment });
+    const message = commentStatus === "approved" ? "评论发表成功" : "评论已提交，博主审核通过后将正式显示";
+    return c.json({ success: true, comment, message, status: commentStatus });
   }
 );
 

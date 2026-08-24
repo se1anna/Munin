@@ -296,6 +296,30 @@ a:hover {
   margin-bottom: 8px;
 }
 
+.entry-content table,
+.wp-block-table table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 28px 0;
+  font-size: 15px;
+}
+
+.entry-content th,
+.entry-content td,
+.wp-block-table th,
+.wp-block-table td {
+  border: 1px solid var(--wp--preset--color--border);
+  padding: 12px 16px;
+  text-align: left;
+}
+
+.entry-content th,
+.wp-block-table th {
+  background: var(--wp--preset--color--surface);
+  color: var(--wp--preset--color--text);
+  font-weight: 600;
+}
+
 /* Comments Section */
 .comments-section {
   margin-top: 60px;
