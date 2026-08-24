@@ -1,0 +1,75 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "munin-blog",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-07-18",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CACHE_KV",
+      "id": "FILL_ID_HERE",
+      "preview_id": "blog_cache_kv_preview_id"
+    },
+    {
+      "binding": "HOTP_KV",
+      "id": "FILL_ID_HERE",
+      "preview_id": "blog_hotp_kv_preview_id"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BLOG_DO",
+        "class_name": "BlogDO"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "BlogDO"
+      ]
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "MY_BUCKET",
+      "bucket_name": "blog-media",
+      "preview_bucket_name": "blog-media-preview"
+    }
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL"
+    }
+  ],
+  "observability": {
+    "enabled": false,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 1,
+      "persist": true,
+      "invocation_logs": true
+    },
+    "traces": {
+      "enabled": false,
+      "persist": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "vars": {
+    "SITE_NAME": "Munin",
+    "SITE_URL": "FILL_URL_HERE",
+    "SITE_DESCRIPTION": "Yet another Serverless Blog.",
+    "TURNSTILE_SITE_KEY": "FILL_SITEKEY_HERE",
+    "TURNSTILE_SECRET_KEY": "FILL_SECRETKEY_HERE",
+    "FROM_EMAIL": "FILL_FROMEMAIL_HERE",
+    "HOTP_HEADER_KEY": "X-HOTP-Key",
+    "ADMIN_EMAIL": "FILL_ADMIN_EMAIL_HERE",
+    "JWT_SECRET": "FILL_'openssl rand -base64 64'_GEN_STUFF_HERE"
+  }
+}

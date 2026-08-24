@@ -1,0 +1,27 @@
+{
+  "name": "cf-serverless-blog",
+  "version": "1.0.0",
+  "description": "Full-stack dynamic blog system running on Cloudflare Serverless ecosystem",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test:system": "npx tsx test/system.test.ts",
+    "test:security": "npx tsx test/security.test.ts",
+    "test:oauth": "npx tsx test/oauth.test.ts",
+    "test": "npm run typecheck && npm run test:system && npm run test:security && npm run test:oauth",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "hono": "^4.6.14",
+    "markdown-it": "^15.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241230.0",
+    "@types/markdown-it": "^14.2.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "wrangler": "^3.99.0"
+  }
+}

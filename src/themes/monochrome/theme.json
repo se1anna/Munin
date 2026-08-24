@@ -1,0 +1,68 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/theme.json",
+  "version": 3,
+  "title": "Monochrome (极简纯黑白)",
+  "description": "极简纯黑白典藏主题。纯白底色与纯黑字型，Playfair Display 衬线大标题，直角硬朗线条，报刊杂志级纯粹排版",
+  "settings": {
+    "color": {
+      "palette": [
+        { "name": "背景色", "slug": "background", "color": "#FFFFFF" },
+        { "name": "主文字色", "slug": "foreground", "color": "#000000" },
+        { "name": "次要表面", "slug": "muted", "color": "#F5F5F5" },
+        { "name": "次要文字", "slug": "muted-foreground", "color": "#525252" },
+        { "name": "点睛色", "slug": "accent", "color": "#000000" },
+        { "name": "点睛文字", "slug": "accent-foreground", "color": "#FFFFFF" },
+        { "name": "主边框", "slug": "border", "color": "#000000" },
+        { "name": "细分割线", "slug": "border-light", "color": "#E5E5E5" },
+        { "name": "卡片表面", "slug": "card", "color": "#FFFFFF" }
+      ]
+    },
+    "typography": {
+      "fontFamilies": [
+        {
+          "name": "标题字体",
+          "slug": "display",
+          "fontFamily": "\"Playfair Display\", Georgia, \"Times New Roman\", serif"
+        },
+        {
+          "name": "正文字体",
+          "slug": "serif",
+          "fontFamily": "\"Source Serif 4\", Georgia, \"Times New Roman\", serif"
+        },
+        {
+          "name": "等宽与数据字体",
+          "slug": "mono",
+          "fontFamily": "\"JetBrains Mono\", \"Fira Code\", monospace"
+        }
+      ],
+      "fontSizes": [
+        { "name": "超小号", "slug": "xs", "size": "0.75rem" },
+        { "name": "小号", "slug": "sm", "size": "0.875rem" },
+        { "name": "标准正文", "slug": "base", "size": "1rem" },
+        { "name": "前言引段", "slug": "lg", "size": "1.125rem" },
+        { "name": "小标题", "slug": "xl", "size": "1.25rem" },
+        { "name": "栏目导引", "slug": "2xl", "size": "1.5rem" },
+        { "name": "三级标题", "slug": "3xl", "size": "2rem" },
+        { "name": "二级标题", "slug": "4xl", "size": "2.5rem" },
+        { "name": "大号标题", "slug": "5xl", "size": "3.5rem" },
+        { "name": "超大标题", "slug": "6xl", "size": "4.5rem" },
+        { "name": "海报巨幅", "slug": "7xl", "size": "6rem" },
+        { "name": "展陈巨字", "slug": "8xl", "size": "8rem" }
+      ]
+    },
+    "layout": {
+      "contentSize": "860px",
+      "wideSize": "1180px"
+    }
+  },
+  "styles": {
+    "color": {
+      "background": "var(--wp--preset--color--background)",
+      "text": "var(--wp--preset--color--foreground)"
+    },
+    "typography": {
+      "fontFamily": "var(--wp--preset--font-family--serif)",
+      "lineHeight": "1.65"
+    }
+  }
+}

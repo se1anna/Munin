@@ -1,0 +1,29 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/theme.json",
+  "version": 3,
+  "title": "极简暗黑主题",
+  "description": "专为 Cloudflare Serverless 设计的高性能极简暗黑风格主题",
+  "settings": {
+    "color": {
+      "palette": [
+        { "name": "主色调", "slug": "primary", "color": "#38bdf8" },
+        { "name": "次要色", "slug": "secondary", "color": "#818cf8" },
+        { "name": "背景色", "slug": "background", "color": "#0d0f12" },
+        { "name": "卡片表面", "slug": "surface", "color": "#161a20" },
+        { "name": "边框", "slug": "border", "color": "#262c36" },
+        { "name": "文字", "slug": "text", "color": "#e2e8f0" },
+        { "name": "次要文字", "slug": "text-muted", "color": "#94a3b8" }
+      ]
+    },
+    "layout": {
+      "contentSize": "780px",
+      "wideSize": "1100px"
+    }
+  },
+  "styles": {
+    "color": {
+      "background": "var(--wp--preset--color--background)",
+      "text": "var(--wp--preset--color--text)"
+    }
+  }
+}

@@ -1,0 +1,68 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/theme.json",
+  "version": 3,
+  "title": "Bold Typography",
+  "description": "海报级大字排版风格主题：极具视觉张力的高对比度排版设计，字型即视觉主体，直角硬朗分界，朱砂红点睛",
+  "settings": {
+    "color": {
+      "palette": [
+        { "name": "背景色", "slug": "background", "color": "#0A0A0A" },
+        { "name": "主文字色", "slug": "foreground", "color": "#FAFAFA" },
+        { "name": "次要表面", "slug": "muted", "color": "#1A1A1A" },
+        { "name": "次要文字", "slug": "muted-foreground", "color": "#737373" },
+        { "name": "点睛主色", "slug": "accent", "color": "#FF3D00" },
+        { "name": "点睛文字", "slug": "accent-foreground", "color": "#0A0A0A" },
+        { "name": "极细边框", "slug": "border", "color": "#262626" },
+        { "name": "卡片表面", "slug": "card", "color": "#0F0F0F" },
+        { "name": "输入框底色", "slug": "input", "color": "#1A1A1A" }
+      ]
+    },
+    "typography": {
+      "fontFamilies": [
+        {
+          "name": "标题与正文字体",
+          "slug": "sans",
+          "fontFamily": "\"Inter Tight\", \"Inter\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, sans-serif"
+        },
+        {
+          "name": "引文衬线字体",
+          "slug": "display",
+          "fontFamily": "\"Playfair Display\", Georgia, \"Times New Roman\", serif"
+        },
+        {
+          "name": "等宽与数据字体",
+          "slug": "mono",
+          "fontFamily": "\"JetBrains Mono\", \"Fira Code\", Menlo, monospace"
+        }
+      ],
+      "fontSizes": [
+        { "name": "超小号", "slug": "xs", "size": "0.75rem" },
+        { "name": "小号", "slug": "sm", "size": "0.875rem" },
+        { "name": "标准正文", "slug": "base", "size": "1rem" },
+        { "name": "前言引段", "slug": "lg", "size": "1.125rem" },
+        { "name": "小标题", "slug": "xl", "size": "1.25rem" },
+        { "name": "栏目导引", "slug": "2xl", "size": "1.5rem" },
+        { "name": "三级标题", "slug": "3xl", "size": "2rem" },
+        { "name": "二级标题", "slug": "4xl", "size": "2.5rem" },
+        { "name": "大号标题", "slug": "5xl", "size": "3.5rem" },
+        { "name": "超大标题", "slug": "6xl", "size": "4.5rem" },
+        { "name": "海报巨幅", "slug": "7xl", "size": "6rem" },
+        { "name": "展陈巨字", "slug": "8xl", "size": "8rem" }
+      ]
+    },
+    "layout": {
+      "contentSize": "860px",
+      "wideSize": "1200px"
+    }
+  },
+  "styles": {
+    "color": {
+      "background": "var(--wp--preset--color--background)",
+      "text": "var(--wp--preset--color--foreground)"
+    },
+    "typography": {
+      "fontFamily": "var(--wp--preset--font-family--sans)",
+      "lineHeight": "1.6"
+    }
+  }
+}

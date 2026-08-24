@@ -1,0 +1,66 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build and Compilation Outputs
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# Documentation
+doc/
+docs/
+*.doc
+*.docx
+*.pdf
+
+# Configuration, Secrets, and Environment Variables
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+*.local
+*.pem
+*.key
+*.cert
+*.crt
+*.p12
+*.pfx
+hotp-keys*.txt
+*backup*.json
+service-account*.json
+wrangler.jsonc
+
+# Virtual Cloudflare Environments, Local SQLite & Storage
+.wrangler/
+.mf/
+.miniflare/
+.cloudflare/
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.db
+*.db-journal
+
+# Tests, Test Fixtures, and Coverage
+test/
+tests/
+coverage/
+.nyc_output/
+*.lcov
+scratch/
+
+# IDE and OS Metadata
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.gemini/
