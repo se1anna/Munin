@@ -666,6 +666,33 @@ ${THEME_DARK_CSS}
   </div>
 </div>
 
+<!-- OAuth Logs Purge Modal -->
+<div id="oauth-purge-modal" class="auth-modal-overlay" style="display: none;" onclick="if(event.target===this)closeOAuthPurgeModal()">
+  <div class="auth-card" style="max-width:460px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 16px; border-bottom:1px solid #222834; padding-bottom:12px;">
+      <h3 style="margin:0; font-size: 18px; color: #f8fafc;">清除 OAuth 历史授权记录</h3>
+      <button type="button" class="btn" style="padding:4px 8px; font-size:12px; background:#202630; color:#94a3b8;" onclick="closeOAuthPurgeModal()">关闭</button>
+    </div>
+    <div class="form-group">
+      <label>请选择历史记录保留范围：</label>
+      <select id="oauth-purge-retention" class="form-control">
+        <option value="30d">保留近一个月（清除 30 天前的历史记录）</option>
+        <option value="7d">保留近一周（清除 7 天前的历史记录）</option>
+        <option value="3d">保留近三天（清除 3 天前的历史记录）</option>
+        <option value="1d">保留近一天（清除 24 小时前的历史记录）</option>
+        <option value="all">全部清除（清空所有 OAuth 历史记录）</option>
+      </select>
+    </div>
+    <p style="font-size:13px; color:#ef4444; margin-bottom:16px;">
+      注意：记录清除后将无法恢复，审计数据将被永久删除。
+    </p>
+    <div style="display:flex; gap:10px; justify-content:flex-end;">
+      <button type="button" class="btn" style="background:#202630; color:#94a3b8;" onclick="closeOAuthPurgeModal()">取消</button>
+      <button type="button" class="btn" style="background:#7f1d1d; color:#f87171; font-weight:700;" onclick="executeOAuthPurge()" id="oauth-purge-confirm-btn">确认执行清理</button>
+    </div>
+  </div>
+</div>
+
 <div class="admin-layout" id="admin-main">
   <!-- Sidebar -->
   <aside class="admin-sidebar">
@@ -677,6 +704,7 @@ ${THEME_DARK_CSS}
     <div class="admin-nav-item" onclick="showTab('posts')" id="nav-posts">文章管理</div>
     <div class="admin-nav-item" onclick="showTab('editor')" id="nav-editor">新建文章</div>
     <div class="admin-nav-item" onclick="showTab('comments')" id="nav-comments">评论审核</div>
+    <div class="admin-nav-item" onclick="showTab('users')" id="nav-users">用户管理</div>
     <div class="admin-nav-item" onclick="showTab('media')" id="nav-media">媒体库</div>
     <div class="admin-nav-item" onclick="showTab('hotp')" id="nav-hotp">HOTP 密钥池</div>
     <div class="admin-nav-item" onclick="showTab('oauth')" id="nav-oauth">OAuth 应用</div>
@@ -875,6 +903,39 @@ ${THEME_DARK_CSS}
       </table>
     </section>
 
+    <!-- 4.5. Users Management Tab -->
+    <section id="tab-users" style="display:none;">
+      <div class="admin-header">
+        <h2>用户管理与权限中心</h2>
+      </div>
+
+      <!-- Smart Search Bar -->
+      <div class="post-card" style="margin-bottom:20px; padding:16px 20px;">
+        <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+          <div style="flex:1; min-width:260px;">
+            <input type="text" id="user-search-input" class="form-control" placeholder="智能搜索：输入用户名或邮箱实时检索..." oninput="handleUserSearchInput()" />
+          </div>
+          <button class="btn btn-primary" onclick="loadUsers()" style="white-space:nowrap;">刷新用户列表</button>
+        </div>
+      </div>
+
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>用户名 / 昵称</th>
+            <th>电子邮箱</th>
+            <th>角色权限</th>
+            <th>注册时间</th>
+            <th>最后登录时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="users-table-body">
+          <tr><td colspan="6" style="text-align:center; color:#64748b; padding:32px 16px;">加载用户列表中...</td></tr>
+        </tbody>
+      </table>
+    </section>
+
     <!-- 5. Media Tab -->
     <section id="tab-media" style="display:none;">
       <div class="admin-header">
@@ -930,74 +991,138 @@ ${THEME_DARK_CSS}
       </div>
     </section>
 
-    <!-- 8. OAuth Applications Tab -->
+    <!-- 8. OAuth Applications & Audit Logs Tab -->
     <section id="tab-oauth" style="display:none;">
-      <div class="admin-header" style="display:flex; justify-content:space-between; align-items:center;">
+      <div class="admin-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
         <div>
-          <h2 style="margin:0;">OAuth 客户端应用</h2>
-          <p style="color:#94a3b8; font-size:13px; margin-top:4px;">将博客账号作为统一认证中心，为其他外部系统提供单点登录与鉴权</p>
+          <h2 style="margin:0;">OAuth 统一认证与授权审计</h2>
+          <p style="color:#94a3b8; font-size:13px; margin-top:4px;">管理接入的第三方系统，并实时追溯各用户的 OAuth 授权鉴权历史</p>
         </div>
-        <button class="btn btn-primary" onclick="toggleOAuthCreateModal()">+ 创建应用</button>
-      </div>
-
-      <div class="post-card" style="margin-bottom:20px; background:#111827;">
-        <div style="font-size:13px; color:#38bdf8; font-weight:600; margin-bottom:6px;">配置地址</div>
-        <div style="display:flex; align-items:center; gap:8px;">
-          <input type="text" class="form-control" style="font-family:monospace; font-size:13px;" readonly id="oidc-discovery-url" />
-          <button class="btn" style="white-space:nowrap; padding:6px 12px; font-size:12px; background:#1e293b; color:#38bdf8;" onclick="copyOidcUrl()">复制</button>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="btn" id="oauth-view-btn-apps" onclick="switchOAuthView('apps')" style="background:#38bdf8; color:#0f172a; font-weight:700;">已注册应用</button>
+          <button type="button" class="btn" id="oauth-view-btn-logs" onclick="switchOAuthView('logs')" style="background:#1e293b; color:#94a3b8;">授权历史审计</button>
         </div>
       </div>
 
-      <div class="post-card" id="oauth-create-card" style="display:none; margin-bottom:24px; border-color:#38bdf8;">
-        <h3 style="margin-top:0; color:#f8fafc; font-size:18px;">注册新的接入系统</h3>
-        <form onsubmit="return handleCreateOAuthApp(event)">
-          <div class="form-group">
-            <label>应用名称 *</label>
-            <input type="text" id="oauth-name" class="form-control" required placeholder="例如: 知识库系统、论坛、运维面板" />
-          </div>
-          <div class="form-group">
-            <label>回调地址 * (一行一个)</label>
-            <textarea id="oauth-redirects" class="form-control" rows="3" required placeholder="https://app.example.com/api/auth/callback&#10;http://localhost:3000/api/auth/callback"></textarea>
-          </div>
-          <div class="form-group">
-            <label>权限范围</label>
-            <input type="text" id="oauth-scopes" class="form-control" value="openid profile email role" />
-          </div>
-          <div class="form-group" style="display:flex; align-items:center; gap:8px;">
-            <input type="checkbox" id="oauth-trusted" checked style="width:auto;" />
-            <label for="oauth-trusted" style="margin:0; cursor:pointer;">设为受信任应用，免二次授权确认</label>
-          </div>
-          <div style="display:flex; gap:10px;">
-            <button type="submit" class="btn btn-primary" id="oauth-save-btn">确认创建应用</button>
-            <button type="button" class="btn" style="background:#1e293b; color:#94a3b8;" onclick="toggleOAuthCreateModal()">取消</button>
-          </div>
-        </form>
-      </div>
-
-      <div id="oauth-new-secret-banner" style="display:none; margin-bottom:20px; padding:16px; background:#064e3b; border:1px solid #059669; border-radius:8px;">
-        <h4 style="margin:0 0 6px 0; color:#34d399;">应用创建成功，请立即复制并保存客户端密钥</h4>
-        <p style="font-size:13px; color:#e2e8f0; margin-bottom:8px;">客户端密钥仅在此处显示一次，离开页面后将无法再次查看。</p>
-        <div style="display:flex; gap:8px; align-items:center;">
-          <input type="text" id="new-secret-display" class="form-control" readonly style="font-family:monospace; color:#34d399; font-weight:700;" />
-          <button class="btn" style="white-space:nowrap; padding:6px 12px; font-size:12px; background:#047857; color:#fff;" onclick="copyNewSecret()">复制密钥</button>
+      <!-- Subview 1: Apps -->
+      <div id="oauth-subview-apps">
+        <div style="display:flex; justify-content:flex-end; margin-bottom:16px;">
+          <button class="btn btn-primary" onclick="toggleOAuthCreateModal()">+ 注册新应用</button>
         </div>
+
+        <div class="post-card" style="margin-bottom:20px; background:#111827;">
+          <div style="font-size:13px; color:#38bdf8; font-weight:600; margin-bottom:6px;">OIDC 标准发现配置地址</div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <input type="text" class="form-control" style="font-family:monospace; font-size:13px;" readonly id="oidc-discovery-url" />
+            <button class="btn" style="white-space:nowrap; padding:6px 12px; font-size:12px; background:#1e293b; color:#38bdf8;" onclick="copyOidcUrl()">复制</button>
+          </div>
+        </div>
+
+        <div class="post-card" id="oauth-create-card" style="display:none; margin-bottom:24px; border-color:#38bdf8;">
+          <h3 style="margin-top:0; color:#f8fafc; font-size:18px;">注册新的接入系统</h3>
+          <form onsubmit="return handleCreateOAuthApp(event)">
+            <div class="form-group">
+              <label>应用名称 *</label>
+              <input type="text" id="oauth-name" class="form-control" required placeholder="例如: 知识库系统、论坛、运维面板" />
+            </div>
+            <div class="form-group">
+              <label>回调地址 * (一行一个)</label>
+              <textarea id="oauth-redirects" class="form-control" rows="3" required placeholder="https://app.example.com/api/auth/callback&#10;http://localhost:3000/api/auth/callback"></textarea>
+            </div>
+            <div class="form-group">
+              <label>权限范围</label>
+              <input type="text" id="oauth-scopes" class="form-control" value="openid profile email role" />
+            </div>
+            <div class="form-group" style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" id="oauth-trusted" checked style="width:auto;" />
+              <label for="oauth-trusted" style="margin:0; cursor:pointer;">设为受信任应用，免二次授权确认</label>
+            </div>
+            <div style="display:flex; gap:10px;">
+              <button type="submit" class="btn btn-primary" id="oauth-save-btn">确认创建应用</button>
+              <button type="button" class="btn" style="background:#1e293b; color:#94a3b8;" onclick="toggleOAuthCreateModal()">取消</button>
+            </div>
+          </form>
+        </div>
+
+        <div id="oauth-new-secret-banner" style="display:none; margin-bottom:20px; padding:16px; background:#064e3b; border:1px solid #059669; border-radius:8px;">
+          <h4 style="margin:0 0 6px 0; color:#34d399;">应用创建成功，请立即复制并保存客户端密钥</h4>
+          <p style="font-size:13px; color:#e2e8f0; margin-bottom:8px;">客户端密钥仅在此处显示一次，离开页面后将无法再次查看。</p>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="text" id="new-secret-display" class="form-control" readonly style="font-family:monospace; color:#34d399; font-weight:700;" />
+            <button class="btn" style="white-space:nowrap; padding:6px 12px; font-size:12px; background:#047857; color:#fff;" onclick="copyNewSecret()">复制密钥</button>
+          </div>
+        </div>
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>应用名称</th>
+              <th>Client ID</th>
+              <th>回调地址</th>
+              <th>属性</th>
+              <th>创建时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="oauth-table-body">
+            <tr><td colspan="6" style="text-align:center; padding:24px 16px; color:#64748b;">加载中...</td></tr>
+          </tbody>
+        </table>
       </div>
 
-      <table class="data-table">
-        <thead>
-          <tr>
-            <th>应用名称</th>
-            <th>Client ID</th>
-            <th>回调地址</th>
-            <th>属性</th>
-            <th>创建时间</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="oauth-table-body">
-          <tr><td colspan="6" style="text-align:center; padding:24px 16px; color:#64748b;">加载中...</td></tr>
-        </tbody>
-      </table>
+      <!-- Subview 2: Audit Logs with Multi-condition Cross Filters -->
+      <div id="oauth-subview-logs" style="display:none;">
+        <div class="post-card" style="margin-bottom:20px; padding:18px 20px;">
+          <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end;">
+            <div style="flex:1; min-width:180px;">
+              <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:4px;">应用筛选</label>
+              <select id="oauth-filter-client" class="form-control" onchange="loadOAuthLogs()">
+                <option value="">全部应用</option>
+              </select>
+            </div>
+            <div style="flex:1; min-width:180px;">
+              <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:4px;">用户名筛选</label>
+              <input type="text" id="oauth-filter-username" class="form-control" placeholder="输入用户名搜索..." oninput="handleOAuthFilterInput()" />
+            </div>
+            <div style="flex:1; min-width:180px;">
+              <label style="display:block; font-size:12px; color:#94a3b8; margin-bottom:4px;">时间范围</label>
+              <select id="oauth-filter-period" class="form-control" onchange="handleOAuthPeriodChange()">
+                <option value="">全部时间</option>
+                <option value="today">今天 (24小时内)</option>
+                <option value="3d">近 3 天</option>
+                <option value="7d">近 7 天</option>
+                <option value="30d">近 30 天</option>
+                <option value="custom">自定义日期范围...</option>
+              </select>
+            </div>
+            <div id="oauth-custom-date-box" style="display:none; gap:6px; align-items:center;">
+              <input type="date" id="oauth-filter-start" class="form-control" style="width:auto;" onchange="loadOAuthLogs()" />
+              <span style="color:#94a3b8;">至</span>
+              <input type="date" id="oauth-filter-end" class="form-control" style="width:auto;" onchange="loadOAuthLogs()" />
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn" style="background:#1e293b; color:#38bdf8;" onclick="resetOAuthLogFilters()">重置条件</button>
+              <button class="btn" style="background:#7f1d1d; color:#f87171;" onclick="openOAuthPurgeModal()">清除历史记录</button>
+            </div>
+          </div>
+        </div>
+
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>用户名</th>
+              <th>授权应用</th>
+              <th>Client ID</th>
+              <th>访问范围 (Scope)</th>
+              <th>客户端 IP</th>
+              <th>授权时间</th>
+            </tr>
+          </thead>
+          <tbody id="oauth-logs-table-body">
+            <tr><td colspan="6" style="text-align:center; padding:32px 16px; color:#64748b;">加载授权记录中...</td></tr>
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <!-- 9. Options Tab -->
@@ -1126,6 +1251,44 @@ ${THEME_DARK_CSS}
         </form>
       </div>
     </section>
+
+    <!-- 10. Subscriber / Reader Profile Tab -->
+    <section id="tab-subscriber" style="display:none;">
+      <div class="admin-header">
+        <h2>读者个人中心</h2>
+      </div>
+      <div class="post-card" style="max-width:680px; margin-bottom:24px; border-left:4px solid #38bdf8;">
+        <h3 style="margin-top:0; color:#f8fafc; font-size:18px;">账号身份信息</h3>
+        <p style="color:#94a3b8; font-size:14px; line-height:1.6; margin-bottom:16px;">
+          您当前登录身份为 <span class="badge" style="background:#1e293b; color:#38bdf8; border:1px solid #38bdf8;">普通订阅者 (subscriber)</span>。<br/>
+          普通订阅者可在博客前台发表评论互动，但暂无后台文章发布、评论审核与系统管理权限。如需成为创作者或管理员，请联系站点管理员提升权限。
+        </p>
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <a href="/" class="btn btn-primary" style="text-decoration:none;">前往博客首页浏览文章</a>
+          <button onclick="handleLogout()" class="btn" style="background:#202630; color:#ef4444;">退出登录</button>
+        </div>
+      </div>
+
+      <div class="post-card" style="max-width:680px;">
+        <h3 style="margin-top:0; color:#f8fafc; font-size:18px;">修改密码</h3>
+        <form onsubmit="return handleChangePassword(event, 'sub-pwd')">
+          <div class="form-group">
+            <label>原密码 *</label>
+            <input type="password" id="sub-pwd-old" class="form-control" required placeholder="输入当前使用的密码" />
+          </div>
+          <div class="form-group">
+            <label>新密码 * (需包含大小写字母、数字及特殊符号)</label>
+            <input type="password" id="sub-pwd-new" class="form-control" required placeholder="输入新密码" />
+          </div>
+          <div class="form-group">
+            <label>确认新密码 *</label>
+            <input type="password" id="sub-pwd-confirm" class="form-control" required placeholder="再次输入新密码" />
+          </div>
+          <button type="submit" class="btn btn-primary" id="sub-change-pwd-btn">确认修改密码</button>
+          <span id="sub-pwd-msg" style="margin-left:12px; font-size:13px;"></span>
+        </form>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -1154,14 +1317,47 @@ async function checkAuth() {
     if (res.ok) {
       const data = await res.json();
       currentUser = data.user;
-      document.getElementById('current-user-info').innerText = '当前用户: ' + currentUser.display_name + ' (' + currentUser.role + ')';
+      const roleMap = {
+        administrator: '超级管理员',
+        author: '创作者',
+        subscriber: '普通读者'
+      };
+      const roleLabel = roleMap[currentUser.role] || currentUser.role;
+      document.getElementById('current-user-info').innerText = '当前用户: ' + currentUser.display_name + ' (' + roleLabel + ')';
       document.getElementById('auth-modal').style.display = 'none';
-      loadOverview();
+      applyRoleView(currentUser.role);
     } else {
       document.getElementById('auth-modal').style.display = 'flex';
     }
   } catch (err) {
     document.getElementById('auth-modal').style.display = 'flex';
+  }
+}
+
+function applyRoleView(role) {
+  const adminNavs = ['nav-overview', 'nav-posts', 'nav-editor', 'nav-comments', 'nav-users', 'nav-media', 'nav-hotp', 'nav-oauth', 'nav-backup', 'nav-options'];
+  if (role === 'subscriber') {
+    adminNavs.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    showTab('subscriber');
+  } else if (role === 'author') {
+    ['nav-overview', 'nav-posts', 'nav-editor', 'nav-media'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'block';
+    });
+    ['nav-comments', 'nav-users', 'nav-hotp', 'nav-oauth', 'nav-backup', 'nav-options'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    });
+    showTab('posts');
+  } else {
+    adminNavs.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'block';
+    });
+    showTab('overview');
   }
 }
 
@@ -1379,13 +1575,14 @@ async function handleResetPassword(e) {
   return false;
 }
 
-async function handleChangePassword(e) {
+async function handleChangePassword(e, prefix) {
   e.preventDefault();
-  const old_password = document.getElementById('pwd-old').value;
-  const new_password = document.getElementById('pwd-new').value;
-  const confirm_password = document.getElementById('pwd-confirm').value;
-  const btn = document.getElementById('change-pwd-btn');
-  const msg = document.getElementById('pwd-msg');
+  const p = prefix || 'pwd';
+  const old_password = document.getElementById(p + '-old').value;
+  const new_password = document.getElementById(p + '-new').value;
+  const confirm_password = document.getElementById(p + '-confirm').value;
+  const btn = document.getElementById(p === 'pwd' ? 'change-pwd-btn' : 'sub-change-pwd-btn');
+  const msg = document.getElementById(p === 'pwd' ? 'pwd-msg' : 'sub-pwd-msg');
 
   if (new_password !== confirm_password) {
     msg.style.color = '#ef4444';
@@ -1407,9 +1604,9 @@ async function handleChangePassword(e) {
     if (res.ok) {
       msg.style.color = '#10b981';
       msg.innerText = '密码修改成功，请牢记新密码。';
-      document.getElementById('pwd-old').value = '';
-      document.getElementById('pwd-new').value = '';
-      document.getElementById('pwd-confirm').value = '';
+      document.getElementById(p + '-old').value = '';
+      document.getElementById(p + '-new').value = '';
+      document.getElementById(p + '-confirm').value = '';
     } else {
       msg.style.color = '#ef4444';
       msg.innerText = data.error || '修改密码失败';
@@ -1430,7 +1627,7 @@ async function handleLogout() {
 }
 
 function showTab(name) {
-  const tabs = ['overview', 'posts', 'editor', 'comments', 'media', 'hotp', 'oauth', 'backup', 'options'];
+  const tabs = ['overview', 'posts', 'editor', 'comments', 'users', 'media', 'hotp', 'oauth', 'backup', 'options', 'subscriber'];
   tabs.forEach(t => {
     const el = document.getElementById('tab-' + t);
     const nav = document.getElementById('nav-' + t);
@@ -1441,8 +1638,12 @@ function showTab(name) {
   if (name === 'overview') loadOverview();
   if (name === 'posts') loadPosts();
   if (name === 'comments') loadComments();
+  if (name === 'users') loadUsers();
   if (name === 'media') loadMedia();
-  if (name === 'oauth') loadOAuthClients();
+  if (name === 'oauth') {
+    loadOAuthClients();
+    loadOAuthLogs();
+  }
   if (name === 'options') initThemeComparison();
 }
 
@@ -2026,10 +2227,10 @@ function renderVisualBlocks() {
       '<div class="visual-block-header">' +
       '<div class="visual-block-type"><span>' + typeIcon + '</span><span>' + typeLabel + '</span></div>' +
       '<div class="visual-block-actions">' +
-      '<button type="button" class="block-action-btn" title="向上移动" onclick="moveBlock(' + idx + ', -1)">上移</button>' +
-      '<button type="button" class="block-action-btn" title="向下移动" onclick="moveBlock(' + idx + ', 1)">下移</button>' +
-      '<button type="button" class="block-action-btn" title="在下方插入区块" onclick="openBlockInserterModal(' + idx + ')">插入</button>' +
-      '<button type="button" class="block-action-btn delete" title="删除区块" onclick="deleteBlock(' + idx + ')">删除</button>' +
+      '<button type="button" class="block-action-btn" title="向上移动" onclick="moveBlock(' + idx + ', -1)">↑</button>' +
+      '<button type="button" class="block-action-btn" title="向下移动" onclick="moveBlock(' + idx + ', 1)">↓</button>' +
+      '<button type="button" class="block-action-btn" title="在下方插入区块" onclick="openBlockInserterModal(' + idx + ')">+</button>' +
+      '<button type="button" class="block-action-btn delete" title="删除区块" onclick="deleteBlock(' + idx + ')">-</button>' +
       '</div></div>' +
       '<div class="visual-block-body">' + blockBody + '</div>' +
       '</div>';
@@ -2348,6 +2549,102 @@ async function deleteComment(id) {
   if (res.ok) loadComments();
 }
 
+let userSearchTimeout = null;
+function handleUserSearchInput() {
+  clearTimeout(userSearchTimeout);
+  userSearchTimeout = setTimeout(() => {
+    loadUsers();
+  }, 250);
+}
+
+async function loadUsers() {
+  const query = document.getElementById('user-search-input')?.value || '';
+  const url = '/api/admin/users' + (query.trim() ? '?q=' + encodeURIComponent(query.trim()) : '');
+  const res = await fetch(url, { headers: { 'X-Admin-Action': 'true' } });
+  const data = await res.json();
+  const tbody = document.getElementById('users-table-body');
+  if (!tbody) return;
+
+  if (!data.users || data.users.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:36px 16px; color:#64748b; background:#10141c;">未检索到匹配的用户记录</td></tr>';
+    return;
+  }
+
+  const roleOptions = [
+    { value: 'administrator', label: '超级管理员 (Admin)' },
+    { value: 'author', label: '创作者 (Author)' },
+    { value: 'subscriber', label: '普通读者 (Subscriber)' }
+  ];
+
+  tbody.innerHTML = data.users.map(u => {
+    const isSelf = currentUser && currentUser.id === u.id;
+    const selectDisabled = isSelf ? 'disabled title="不可修改当前登录管理员自身的角色"' : '';
+    const roleSelect = '<select class="form-control" style="width:auto; padding:4px 8px; font-size:12px; display:inline-block;" ' + selectDisabled + ' onchange="changeUserRole(&quot;' + escapeHtml(u.id) + '&quot;, this.value)">' +
+      roleOptions.map(r => '<option value="' + r.value + '"' + (u.role === r.value ? ' selected' : '') + '>' + r.label + '</option>').join('') +
+      '</select>';
+    const deleteBtn = isSelf 
+      ? '<span style="font-size:12px; color:#64748b;">(当前账号)</span>'
+      : '<button class="btn" style="padding:4px 8px; font-size:12px; background:#1e293b; color:#ef4444;" onclick="deleteUser(&quot;' + escapeHtml(u.id) + '&quot;, &quot;' + escapeHtml(u.username) + '&quot;)">删除</button>';
+
+    const oauthHistoryBtn = '<button class="btn" style="padding:4px 8px; font-size:12px; background:#1e293b; color:#38bdf8; margin-right:6px;" onclick="viewUserOAuthHistory(&quot;' + escapeHtml(u.id) + '&quot;, &quot;' + escapeHtml(u.username) + '&quot;)">OAuth 历史</button>';
+
+    const lastLogin = u.last_login_at ? u.last_login_at.slice(0, 16).replace('T', ' ') : '<span style="color:#64748b;">未记录</span>';
+    const createdAt = u.created_at ? u.created_at.slice(0, 10) : '';
+
+    return '<tr>' +
+      '<td><strong>' + escapeHtml(u.username) + '</strong>' + (u.display_name && u.display_name !== u.username ? '<br/><span style="font-size:12px; color:#94a3b8;">' + escapeHtml(u.display_name) + '</span>' : '') + '</td>' +
+      '<td>' + escapeHtml(u.email) + '</td>' +
+      '<td>' + roleSelect + '</td>' +
+      '<td>' + createdAt + '</td>' +
+      '<td>' + lastLogin + '</td>' +
+      '<td><div style="display:flex; gap:6px; align-items:center;">' + oauthHistoryBtn + deleteBtn + '</div></td>' +
+      '</tr>';
+  }).join('');
+}
+
+async function changeUserRole(userId, newRole) {
+  if (!confirm('确定要将该用户的权限修改为「' + newRole + '」吗？')) {
+    loadUsers();
+    return;
+  }
+  const res = await fetch('/api/admin/users/' + userId + '/role', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', 'X-Admin-Action': 'true' },
+    body: JSON.stringify({ role: newRole })
+  });
+  const data = await res.json();
+  if (res.ok) {
+    alert('用户角色已成功修改并已使其旧登录凭证即时生效！');
+    loadUsers();
+  } else {
+    alert(data.error || '修改角色失败');
+    loadUsers();
+  }
+}
+
+async function deleteUser(userId, username) {
+  if (!confirm('确定要彻底删除用户「' + username + '」吗？此操作将同时清除该用户的全部关联数据且不可撤销！')) return;
+  const res = await fetch('/api/admin/users/' + userId, {
+    method: 'DELETE',
+    headers: { 'X-Admin-Action': 'true' }
+  });
+  const data = await res.json();
+  if (res.ok) {
+    alert('用户「' + username + '」已成功删除！');
+    loadUsers();
+  } else {
+    alert(data.error || '删除用户失败');
+  }
+}
+
+function viewUserOAuthHistory(userId, username) {
+  showTab('oauth');
+  switchOAuthView('logs');
+  const input = document.getElementById('oauth-filter-username');
+  if (input) input.value = username;
+  loadOAuthLogs();
+}
+
 async function loadMedia() {
   const res = await fetch('/api/admin/media', { headers: { 'X-Admin-Action': 'true' } });
   const data = await res.json();
@@ -2356,15 +2653,15 @@ async function loadMedia() {
     tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:36px 16px; color:#64748b; background:#10141c;">暂无媒体文件</td></tr>';
     return;
   }
-  tbody.innerHTML = data.media.map(m => \`
-    <tr>
-      <td><strong>\${escapeHtml(m.filename)}</strong></td>
-      <td>\${escapeHtml(m.mime_type)}</td>
-      <td>\${(m.size / 1024).toFixed(1)} KB</td>
-      <td><a href="/media/\${encodeURIComponent(m.r2_key)}" target="_blank" style="font-family:monospace; font-size:12px;">/media/\${escapeHtml(m.r2_key)}</a></td>
-      <td>\${m.created_at ? m.created_at.slice(0, 10) : ''}</td>
-    </tr>
-  \`).join('');
+  tbody.innerHTML = data.media.map(m => {
+    return '<tr>' +
+      '<td><strong>' + escapeHtml(m.filename) + '</strong></td>' +
+      '<td>' + escapeHtml(m.mime_type) + '</td>' +
+      '<td>' + (m.size / 1024).toFixed(1) + ' KB</td>' +
+      '<td><a href="/media/' + encodeURIComponent(m.r2_key) + '" target="_blank" style="font-family:monospace; font-size:12px;">/media/' + escapeHtml(m.r2_key) + '</a></td>' +
+      '<td>' + (m.created_at ? m.created_at.slice(0, 10) : '') + '</td>' +
+      '</tr>';
+  }).join('');
 }
 
 async function uploadMediaFile(e) {
@@ -2545,6 +2842,145 @@ async function deleteOAuthApp(id) {
     loadOAuthClients();
   } else {
     alert('删除失败');
+  }
+}
+
+function switchOAuthView(view) {
+  const isApps = view === 'apps';
+  const subviewApps = document.getElementById('oauth-subview-apps');
+  const subviewLogs = document.getElementById('oauth-subview-logs');
+  if (subviewApps) subviewApps.style.display = isApps ? 'block' : 'none';
+  if (subviewLogs) subviewLogs.style.display = isApps ? 'none' : 'block';
+
+  const btnApps = document.getElementById('oauth-view-btn-apps');
+  const btnLogs = document.getElementById('oauth-view-btn-logs');
+  if (btnApps && btnLogs) {
+    btnApps.style.background = isApps ? '#38bdf8' : '#1e293b';
+    btnApps.style.color = isApps ? '#0f172a' : '#94a3b8';
+    btnApps.style.fontWeight = isApps ? '700' : 'normal';
+
+    btnLogs.style.background = !isApps ? '#38bdf8' : '#1e293b';
+    btnLogs.style.color = !isApps ? '#0f172a' : '#94a3b8';
+    btnLogs.style.fontWeight = !isApps ? '700' : 'normal';
+  }
+
+  if (isApps) {
+    loadOAuthClients();
+  } else {
+    loadOAuthLogs();
+  }
+}
+
+function handleOAuthPeriodChange() {
+  const period = document.getElementById('oauth-filter-period')?.value;
+  const customBox = document.getElementById('oauth-custom-date-box');
+  if (customBox) {
+    customBox.style.display = period === 'custom' ? 'flex' : 'none';
+  }
+  loadOAuthLogs();
+}
+
+let oauthFilterTimeout = null;
+function handleOAuthFilterInput() {
+  clearTimeout(oauthFilterTimeout);
+  oauthFilterTimeout = setTimeout(() => {
+    loadOAuthLogs();
+  }, 250);
+}
+
+function resetOAuthLogFilters() {
+  if (document.getElementById('oauth-filter-client')) document.getElementById('oauth-filter-client').value = '';
+  if (document.getElementById('oauth-filter-username')) document.getElementById('oauth-filter-username').value = '';
+  if (document.getElementById('oauth-filter-period')) document.getElementById('oauth-filter-period').value = '';
+  if (document.getElementById('oauth-filter-start')) document.getElementById('oauth-filter-start').value = '';
+  if (document.getElementById('oauth-filter-end')) document.getElementById('oauth-filter-end').value = '';
+  const customBox = document.getElementById('oauth-custom-date-box');
+  if (customBox) customBox.style.display = 'none';
+  loadOAuthLogs();
+}
+
+async function loadOAuthLogs() {
+  const clientSelect = document.getElementById('oauth-filter-client');
+  const clientId = clientSelect ? clientSelect.value : '';
+  const username = document.getElementById('oauth-filter-username')?.value || '';
+  const period = document.getElementById('oauth-filter-period')?.value || '';
+  const startDate = document.getElementById('oauth-filter-start')?.value || '';
+  const endDate = document.getElementById('oauth-filter-end')?.value || '';
+
+  const params = new URLSearchParams();
+  if (clientId) params.set('client_id', clientId);
+  if (username.trim()) params.set('username', username.trim());
+  if (period && period !== 'custom') params.set('period', period);
+  if (period === 'custom') {
+    if (startDate) params.set('start_date', startDate + 'T00:00:00.000Z');
+    if (endDate) params.set('end_date', endDate + 'T23:59:59.999Z');
+  }
+
+  const res = await fetch('/api/admin/oauth/logs?' + params.toString(), { headers: { 'X-Admin-Action': 'true' } });
+  const data = await res.json();
+  const tbody = document.getElementById('oauth-logs-table-body');
+  if (!tbody) return;
+
+  if (!data.logs || data.logs.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:36px 16px; color:#64748b; background:#10141c;">暂无 OAuth 授权历史记录</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = data.logs.map(l => {
+    return '<tr>' +
+      '<td><strong>' + escapeHtml(l.username) + '</strong></td>' +
+      '<td>' + escapeHtml(l.client_name || l.client_id) + '</td>' +
+      '<td><span style="font-family:monospace; font-size:12px; color:#38bdf8;">' + escapeHtml(l.client_id) + '</span></td>' +
+      '<td><span class="badge">' + escapeHtml(l.scope || 'openid') + '</span></td>' +
+      '<td><span style="font-family:monospace; font-size:12px;">' + escapeHtml(l.ip || '—') + '</span></td>' +
+      '<td>' + (l.created_at ? l.created_at.slice(0, 19).replace('T', ' ') : '') + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+function openOAuthPurgeModal() {
+  const m = document.getElementById('oauth-purge-modal');
+  if (m) m.style.display = 'flex';
+}
+
+function closeOAuthPurgeModal() {
+  const m = document.getElementById('oauth-purge-modal');
+  if (m) m.style.display = 'none';
+}
+
+async function executeOAuthPurge() {
+  const retention = document.getElementById('oauth-purge-retention')?.value || '30d';
+  const labelMap = {
+    '30d': '保留近 1 个月记录',
+    '7d': '保留近 1 周记录',
+    '3d': '保留近 3 天记录',
+    '1d': '保留近 1 天记录',
+    'all': '全部彻底清空'
+  };
+
+  if (!confirm('确认执行清理操作（' + (labelMap[retention] || retention) + '）？')) return;
+
+  const btn = document.getElementById('oauth-purge-confirm-btn');
+  if (btn) { btn.disabled = true; btn.innerText = '正在清理...'; }
+
+  try {
+    const res = await fetch('/api/admin/oauth/logs', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Action': 'true' },
+      body: JSON.stringify({ retention })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      alert(data.message || '清理完成');
+      closeOAuthPurgeModal();
+      loadOAuthLogs();
+    } else {
+      alert(data.error || '清理失败');
+    }
+  } catch {
+    alert('网络连接错误');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerText = '确认执行清理'; }
   }
 }
 

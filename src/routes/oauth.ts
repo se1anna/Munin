@@ -315,6 +315,26 @@ oauthRoutes.post(
       expiresIn
     );
 
+    // Record OAuth authorization audit log asynchronously
+    const clientIp = c.req.header("cf-connecting-ip") || c.req.header("x-forwarded-for") || "";
+    if (typeof (blogDO as any).recordOAuthLog === "function") {
+      const logPromise = (blogDO as any).recordOAuthLog({
+        userId: user.id,
+        username: user.username,
+        clientId: client.id,
+        clientName: client.client_name,
+        scope: codeData.scope,
+        ip: clientIp
+      });
+      try {
+        if (c.executionCtx && typeof c.executionCtx.waitUntil === "function") {
+          c.executionCtx.waitUntil(logPromise.catch(() => {}));
+        }
+      } catch {
+        logPromise.catch(() => {});
+      }
+    }
+
     return c.json({
       access_token: accessToken,
       token_type: "Bearer",

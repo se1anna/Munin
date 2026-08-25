@@ -177,6 +177,7 @@ apiAuthRoutes.post(
 
     // Consume verification code only after successful user creation
     await (blogDO as any).consumeCode(cleanEmail, "register");
+    await (blogDO as any).updateUserLastLogin(newUser.id);
 
     const authUser = {
       id: newUser.id,
@@ -283,6 +284,8 @@ apiAuthRoutes.post(
         c.env.CACHE_KV.delete(`ratelimit:account_lockout:${cleanAccount}`).catch(() => {})
       );
     }
+
+    await (blogDO as any).updateUserLastLogin(user.id);
 
     const authUser = {
       id: user.id,

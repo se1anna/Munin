@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { Env } from "../types/env";
 import {
   User,
+  UserRole,
   Post,
   Comment,
   Category,
@@ -11,7 +12,8 @@ import {
   BlogBackupData,
   SiteOptions,
   PostStatus,
-  CommentStatus
+  CommentStatus,
+  OAuthLog
 } from "../types/blog";
 import { OAuthClient } from "../types/oauth";
 import { hashPassword } from "../auth/session";
@@ -123,6 +125,20 @@ export class BlogDO extends DurableObject<Env> {
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS oauth_logs (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        username TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        client_name TEXT NOT NULL,
+        scope TEXT,
+        ip TEXT,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_oauth_logs_user ON oauth_logs (user_id);
+      CREATE INDEX IF NOT EXISTS idx_oauth_logs_client ON oauth_logs (client_id);
+      CREATE INDEX IF NOT EXISTS idx_oauth_logs_time ON oauth_logs (created_at);
     `);
 
     // Schema Migrations for existing SQLite database instances
@@ -132,8 +148,12 @@ export class BlogDO extends DurableObject<Env> {
       if (!hasTokenVersion) {
         this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1");
       }
+      const hasLastLogin = userColumns.some((c) => c.name === "last_login_at");
+      if (!hasLastLogin) {
+        this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN last_login_at TEXT");
+      }
     } catch (e) {
-      console.warn("[Schema Migration] users token_version check:", e);
+      console.warn("[Schema Migration] users columns check:", e);
     }
 
     // Initialize default site options if absent
@@ -328,6 +348,72 @@ export class BlogDO extends DurableObject<Env> {
     return this.queryRows<User>("SELECT * FROM users ORDER BY created_at DESC");
   }
 
+  public async updateUserLastLogin(userId: string): Promise<void> {
+    this.ensureSchema();
+    const now = new Date().toISOString();
+    this.ctx.storage.sql.exec("UPDATE users SET last_login_at = ? WHERE id = ?", now, userId);
+  }
+
+  public async searchUsers(query?: string): Promise<Omit<User, "password_hash">[]> {
+    this.ensureSchema();
+    if (!query || !query.trim()) {
+      return this.queryRows<User>(
+        "SELECT id, username, email, role, display_name, token_version, last_login_at, created_at, updated_at FROM users ORDER BY created_at DESC"
+      );
+    }
+    const cleanQ = `%${query.trim().toLowerCase()}%`;
+    return this.queryRows<User>(
+      `SELECT id, username, email, role, display_name, token_version, last_login_at, created_at, updated_at 
+       FROM users 
+       WHERE LOWER(username) LIKE ? OR LOWER(email) LIKE ? OR LOWER(display_name) LIKE ?
+       ORDER BY created_at DESC`,
+      cleanQ,
+      cleanQ,
+      cleanQ
+    );
+  }
+
+  public async updateUserRole(userId: string, newRole: UserRole, currentAdminId?: string): Promise<{ success: boolean; newVersion?: number; error?: string }> {
+    this.ensureSchema();
+    if (currentAdminId && userId === currentAdminId && newRole !== "administrator") {
+      return { success: false, error: "无法修改当前登录管理员自身的角色，防止后台锁定" };
+    }
+    const user = await this.getUserById(userId);
+    if (!user) {
+      return { success: false, error: "用户不存在" };
+    }
+    const now = new Date().toISOString();
+    const newVersion = (user.token_version || 1) + 1;
+    this.ctx.storage.sql.exec(
+      "UPDATE users SET role = ?, token_version = ?, updated_at = ? WHERE id = ?",
+      newRole,
+      newVersion,
+      now,
+      userId
+    );
+    return { success: true, newVersion };
+  }
+
+  public async deleteUser(userId: string, currentAdminId?: string): Promise<{ success: boolean; error?: string }> {
+    this.ensureSchema();
+    if (currentAdminId && userId === currentAdminId) {
+      return { success: false, error: "无法删除当前登录的管理员账户" };
+    }
+    const user = await this.getUserById(userId);
+    if (!user) {
+      return { success: false, error: "用户不存在" };
+    }
+    if (user.role === "administrator") {
+      const adminCountRows = this.queryRows<{ count: number }>("SELECT COUNT(*) as count FROM users WHERE role = 'administrator'");
+      if ((adminCountRows[0]?.count || 0) <= 1) {
+        return { success: false, error: "系统至少需要保留一名超级管理员，无法删除最后一名管理员" };
+      }
+    }
+    this.ctx.storage.sql.exec("DELETE FROM users WHERE id = ?", userId);
+    this.ctx.storage.sql.exec("DELETE FROM oauth_logs WHERE user_id = ?", userId);
+    return { success: true };
+  }
+
   // --- OAuth Client Management ---
   public async createOAuthClient(data: {
     client_name: string;
@@ -438,6 +524,107 @@ export class BlogDO extends DurableObject<Env> {
       id
     );
     return plainSecret;
+  }
+
+  // --- OAuth Log & Audit Methods ---
+  public async recordOAuthLog(data: {
+    userId: string;
+    username: string;
+    clientId: string;
+    clientName: string;
+    scope?: string;
+    ip?: string;
+  }): Promise<void> {
+    this.ensureSchema();
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    this.ctx.storage.sql.exec(
+      `INSERT INTO oauth_logs (id, user_id, username, client_id, client_name, scope, ip, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      data.userId,
+      data.username,
+      data.clientId,
+      data.clientName || data.clientId,
+      data.scope || "",
+      data.ip || "",
+      now
+    );
+  }
+
+  public async queryOAuthLogs(filters: {
+    userId?: string;
+    username?: string;
+    clientId?: string;
+    startDate?: string;
+    endDate?: string;
+    period?: string;
+    limit?: number;
+  } = {}): Promise<OAuthLog[]> {
+    this.ensureSchema();
+    let sql = "SELECT * FROM oauth_logs WHERE 1=1";
+    const params: any[] = [];
+
+    if (filters.userId) {
+      sql += " AND user_id = ?";
+      params.push(filters.userId);
+    }
+    if (filters.username && filters.username.trim()) {
+      sql += " AND LOWER(username) LIKE ?";
+      params.push(`%${filters.username.trim().toLowerCase()}%`);
+    }
+    if (filters.clientId && filters.clientId.trim()) {
+      sql += " AND client_id = ?";
+      params.push(filters.clientId.trim());
+    }
+    if (filters.startDate && filters.startDate.trim()) {
+      sql += " AND created_at >= ?";
+      params.push(filters.startDate.trim());
+    }
+    if (filters.endDate && filters.endDate.trim()) {
+      sql += " AND created_at <= ?";
+      params.push(filters.endDate.trim());
+    }
+    if (filters.period && filters.period.trim()) {
+      const nowMs = Date.now();
+      let cutoffMs = 0;
+      if (filters.period === "today") cutoffMs = nowMs - 86400000;
+      else if (filters.period === "3d") cutoffMs = nowMs - 86400000 * 3;
+      else if (filters.period === "7d") cutoffMs = nowMs - 86400000 * 7;
+      else if (filters.period === "30d") cutoffMs = nowMs - 86400000 * 30;
+      if (cutoffMs > 0) {
+        sql += " AND created_at >= ?";
+        params.push(new Date(cutoffMs).toISOString());
+      }
+    }
+
+    sql += " ORDER BY created_at DESC LIMIT ?";
+    params.push(filters.limit || 500);
+
+    return this.queryRows<OAuthLog>(sql, ...params);
+  }
+
+  public async purgeOAuthLogs(retention: "all" | "1d" | "3d" | "7d" | "30d"): Promise<{ deletedCount: number }> {
+    this.ensureSchema();
+    if (retention === "all") {
+      const countRow = this.queryRows<{ count: number }>("SELECT COUNT(*) as count FROM oauth_logs");
+      const deletedCount = countRow[0]?.count || 0;
+      this.ctx.storage.sql.exec("DELETE FROM oauth_logs");
+      return { deletedCount };
+    }
+
+    const nowMs = Date.now();
+    let days = 30;
+    if (retention === "1d") days = 1;
+    else if (retention === "3d") days = 3;
+    else if (retention === "7d") days = 7;
+    else if (retention === "30d") days = 30;
+
+    const cutoff = new Date(nowMs - days * 86400000).toISOString();
+    const countRow = this.queryRows<{ count: number }>("SELECT COUNT(*) as count FROM oauth_logs WHERE created_at < ?", cutoff);
+    const deletedCount = countRow[0]?.count || 0;
+    this.ctx.storage.sql.exec("DELETE FROM oauth_logs WHERE created_at < ?", cutoff);
+    return { deletedCount };
   }
 
   // --- Verification Code Methods ---

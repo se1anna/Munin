@@ -224,4 +224,108 @@ apiAdminRoutes.post("/cache/purge-rebuild", async (c) => {
   });
 });
 
+// 9. Users Management & Search
+apiAdminRoutes.get("/users", async (c) => {
+  const q = c.req.query("q") || "";
+  const blogDO = getBlogDOStub(c);
+  const users = await (blogDO as any).searchUsers(q);
+  return c.json({ users });
+});
+
+apiAdminRoutes.put("/users/:id/role", async (c) => {
+  const id = c.req.param("id");
+  const { role } = await c.req.json();
+  if (!role || !["administrator", "author", "subscriber"].includes(role)) {
+    return c.json({ error: "无效的用户角色" }, 400);
+  }
+
+  const currentUser = c.get("user");
+  const blogDO = getBlogDOStub(c);
+  const result = await (blogDO as any).updateUserRole(id, role, currentUser?.id);
+
+  if (!result.success) {
+    return c.json({ error: result.error || "更新角色失败" }, 400);
+  }
+
+  // Update token version in KV if present
+  if (c.env.CACHE_KV && result.newVersion) {
+    try {
+      if (c.executionCtx && typeof c.executionCtx.waitUntil === "function") {
+        c.executionCtx.waitUntil(
+          c.env.CACHE_KV.put(`user_token_ver:${id}`, String(result.newVersion), { expirationTtl: 86400 * 7 }).catch(() => {})
+        );
+      }
+    } catch {
+      c.env.CACHE_KV.put(`user_token_ver:${id}`, String(result.newVersion), { expirationTtl: 86400 * 7 }).catch(() => {});
+    }
+  }
+
+  return c.json({ success: true, message: "用户角色已更新", role, new_version: result.newVersion });
+});
+
+apiAdminRoutes.delete("/users/:id", async (c) => {
+  const id = c.req.param("id");
+  const currentUser = c.get("user");
+  const blogDO = getBlogDOStub(c);
+  const result = await (blogDO as any).deleteUser(id, currentUser?.id);
+
+  if (!result.success) {
+    return c.json({ error: result.error || "删除用户失败" }, 400);
+  }
+
+  if (c.env.CACHE_KV) {
+    try {
+      if (c.executionCtx && typeof c.executionCtx.waitUntil === "function") {
+        c.executionCtx.waitUntil(
+          c.env.CACHE_KV.delete(`user_token_ver:${id}`).catch(() => {})
+        );
+      }
+    } catch {
+      c.env.CACHE_KV.delete(`user_token_ver:${id}`).catch(() => {});
+    }
+  }
+
+  return c.json({ success: true, message: "用户已成功删除" });
+});
+
+// 10. OAuth Audit Logs & Purge
+apiAdminRoutes.get("/oauth/logs", async (c) => {
+  const userId = c.req.query("user_id");
+  const username = c.req.query("username");
+  const clientId = c.req.query("client_id");
+  const period = c.req.query("period");
+  const startDate = c.req.query("start_date");
+  const endDate = c.req.query("end_date");
+  const limit = parseInt(c.req.query("limit") || "500", 10);
+
+  const blogDO = getBlogDOStub(c);
+  const logs = await (blogDO as any).queryOAuthLogs({
+    userId,
+    username,
+    clientId,
+    period,
+    startDate,
+    endDate,
+    limit
+  });
+
+  return c.json({ logs });
+});
+
+apiAdminRoutes.delete("/oauth/logs", async (c) => {
+  const { retention } = await c.req.json().catch(() => ({ retention: "all" }));
+  if (!["all", "1d", "3d", "7d", "30d"].includes(retention)) {
+    return c.json({ error: "无效的保留时段参数" }, 400);
+  }
+
+  const blogDO = getBlogDOStub(c);
+  const { deletedCount } = await (blogDO as any).purgeOAuthLogs(retention);
+
+  return c.json({
+    success: true,
+    deleted_count: deletedCount,
+    message: retention === "all" ? `已成功清空全部 ${deletedCount} 条 OAuth 历史记录！` : `已成功清理指定时间段前的 ${deletedCount} 条记录！`
+  });
+});
+
 

@@ -8,6 +8,7 @@ export interface User {
   role: UserRole;
   display_name: string;
   token_version?: number;
+  last_login_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -19,6 +20,7 @@ export interface AuthUser {
   role: UserRole;
   display_name: string;
   token_version?: number;
+  last_login_at?: string;
 }
 
 export type PostStatus = "published" | "draft";
@@ -115,4 +117,15 @@ export interface BlogBackupData {
   post_terms: PostTerm[];
   comments: Comment[];
   media_metadata: MediaMeta[];
+}
+
+export interface OAuthLog {
+  id: string;
+  user_id: string;
+  username: string;
+  client_id: string;
+  client_name: string;
+  scope?: string;
+  ip?: string;
+  created_at: string;
 }
