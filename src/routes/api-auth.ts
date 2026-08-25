@@ -390,7 +390,64 @@ apiAuthRoutes.post("/change-password", requireAuth, async (c) => {
   });
 });
 
-// 6. Reset Password via Email Code (Forgot Password - Revokes All Existing Sessions)
+// 6. Update Profile (Display Name)
+apiAuthRoutes.put("/profile", requireAuth, async (c) => {
+  const authUser = c.get("user");
+  if (!authUser) {
+    return c.json({ error: "未授权访问" }, 401);
+  }
+
+  const body = await c.req.json();
+  const { display_name } = body;
+
+  if (display_name !== undefined && (typeof display_name !== "string" || display_name.trim().length === 0)) {
+    return c.json({ error: "显示昵称不能为空" }, 400);
+  }
+
+  if (display_name && display_name.trim().length > 50) {
+    return c.json({ error: "显示昵称长度不能超过 50 个字符" }, 400);
+  }
+
+  const blogDO = getBlogDOStub(c);
+  const updatedUser = await (blogDO as any).updateUserProfile(authUser.id, {
+    display_name: display_name ? display_name.trim() : undefined
+  });
+
+  if (!updatedUser) {
+    return c.json({ error: "用户不存在" }, 404);
+  }
+
+  // Update token with new display name
+  const newAuthUser = {
+    ...authUser,
+    display_name: updatedUser.display_name
+  };
+
+  const jwtSecret = c.env.JWT_SECRET;
+  let newToken = "";
+  if (jwtSecret) {
+    newToken = await signJWT(newAuthUser, jwtSecret);
+    c.header(
+      "Set-Cookie",
+      `auth_token=${newToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${86400 * 7}; Secure`
+    );
+  }
+
+  return c.json({
+    success: true,
+    message: "个人资料更新成功",
+    user: {
+      id: updatedUser.id,
+      username: updatedUser.username,
+      email: updatedUser.email,
+      role: updatedUser.role,
+      display_name: updatedUser.display_name
+    },
+    token: newToken
+  });
+});
+
+// 7. Reset Password via Email Code (Forgot Password - Revokes All Existing Sessions)
 apiAuthRoutes.post(
   "/reset-password",
   rateLimit({

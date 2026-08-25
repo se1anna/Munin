@@ -354,6 +354,21 @@ export class BlogDO extends DurableObject<Env> {
     this.ctx.storage.sql.exec("UPDATE users SET last_login_at = ? WHERE id = ?", now, userId);
   }
 
+  public async updateUserProfile(userId: string, data: { display_name?: string }): Promise<User | null> {
+    this.ensureSchema();
+    const now = new Date().toISOString();
+    if (data.display_name !== undefined) {
+      const displayName = String(data.display_name).trim().slice(0, 100);
+      this.ctx.storage.sql.exec(
+        "UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?",
+        displayName,
+        now,
+        userId
+      );
+    }
+    return this.getUserById(userId);
+  }
+
   public async searchUsers(query?: string): Promise<Omit<User, "password_hash">[]> {
     this.ensureSchema();
     if (!query || !query.trim()) {

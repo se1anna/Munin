@@ -710,9 +710,11 @@ ${THEME_DARK_CSS}
     <div class="admin-nav-item" onclick="showTab('oauth')" id="nav-oauth">OAuth 应用</div>
     <div class="admin-nav-item" onclick="showTab('backup')" id="nav-backup">数据备份</div>
     <div class="admin-nav-item" onclick="showTab('options')" id="nav-options">系统设置</div>
+    <div class="admin-nav-item" onclick="showTab('profile')" id="nav-profile">个人设置</div>
 
     <div style="margin-top: auto; padding-top: 20px; border-top: 1px solid #222834;">
       <div style="font-size:13px; color:#94a3b8; margin-bottom:8px;" id="current-user-info">加载中...</div>
+      <button onclick="showTab('profile')" class="btn" style="width:100%; background:#1e293b; color:#38bdf8; font-size:12px; padding:6px 0; margin-bottom:8px;">个人设置</button>
       <button onclick="handleLogout()" class="btn" style="width:100%; background:#202630; color:#ef4444; font-size:13px; padding:6px 0;">安全登出</button>
     </div>
   </aside>
@@ -1230,26 +1232,6 @@ ${THEME_DARK_CSS}
           <span id="opt-msg" style="margin-left:12px; font-size:13px; color:#10b981;"></span>
         </form>
       </div>
-
-      <div class="post-card" style="max-width:600px; margin-top:24px;">
-        <h3 style="margin-top:0; color:#f8fafc; font-size:18px;">修改当前账户登录密码</h3>
-        <form onsubmit="return handleChangePassword(event)">
-          <div class="form-group">
-            <label>原密码 *</label>
-            <input type="password" id="pwd-old" class="form-control" required placeholder="输入当前使用的密码" />
-          </div>
-          <div class="form-group">
-            <label>新密码 * (不少于 6 位)</label>
-            <input type="password" id="pwd-new" class="form-control" required placeholder="输入新密码" />
-          </div>
-          <div class="form-group">
-            <label>确认新密码 *</label>
-            <input type="password" id="pwd-confirm" class="form-control" required placeholder="再次输入新密码" />
-          </div>
-          <button type="submit" class="btn btn-primary" id="change-pwd-btn">确认修改密码</button>
-          <span id="pwd-msg" style="margin-left:12px; font-size:13px;"></span>
-        </form>
-      </div>
     </section>
 
     <!-- 10. Subscriber / Reader Profile Tab -->
@@ -1265,27 +1247,72 @@ ${THEME_DARK_CSS}
         </p>
         <div style="display:flex; gap:12px; flex-wrap:wrap;">
           <a href="/" class="btn btn-primary" style="text-decoration:none;">前往博客首页浏览文章</a>
+          <button onclick="showTab('profile')" class="btn" style="background:#1e293b; color:#38bdf8;">进入个人设置</button>
           <button onclick="handleLogout()" class="btn" style="background:#202630; color:#ef4444;">退出登录</button>
         </div>
       </div>
+    </section>
 
+    <!-- 11. Universal Profile & Security Tab for All Roles -->
+    <section id="tab-profile" style="display:none;">
+      <div class="admin-header">
+        <h2>个人设置</h2>
+      </div>
+
+      <!-- Account Info & Display Name Card -->
+      <div class="post-card" style="max-width:680px; margin-bottom:24px;">
+        <h3 style="margin-top:0; color:#f8fafc; font-size:18px;">账号基本信息</h3>
+        <table style="width:100%; border-collapse:collapse; font-size:14px; margin-bottom:20px;">
+          <tr>
+            <td style="padding:10px 0; color:#94a3b8; width:120px; border-bottom:1px solid #1e293b;">登录账号</td>
+            <td style="padding:10px 0; color:#f8fafc; font-weight:600; border-bottom:1px solid #1e293b;" id="profile-username">-</td>
+          </tr>
+          <tr>
+            <td style="padding:10px 0; color:#94a3b8; border-bottom:1px solid #1e293b;">电子邮箱</td>
+            <td style="padding:10px 0; color:#f8fafc; border-bottom:1px solid #1e293b;" id="profile-email">-</td>
+          </tr>
+          <tr>
+            <td style="padding:10px 0; color:#94a3b8;">当前权限角色</td>
+            <td style="padding:10px 0;" id="profile-role">-</td>
+          </tr>
+        </table>
+
+        <h4 style="color:#f8fafc; font-size:15px; margin-bottom:12px;">修改显示昵称</h4>
+        <form onsubmit="return handleUpdateProfile(event)">
+          <div class="form-group">
+            <label>对外展示昵称 *</label>
+            <input type="text" id="profile-display-name-input" class="form-control" required maxlength="50" placeholder="输入要展示的昵称" />
+          </div>
+          <div style="display:flex; align-items:center;">
+            <button type="submit" class="btn btn-primary" id="profile-save-btn">保存昵称修改</button>
+            <span id="profile-msg" style="margin-left:12px; font-size:13px;"></span>
+          </div>
+        </form>
+      </div>
+
+      <!-- Direct Password Change Card -->
       <div class="post-card" style="max-width:680px;">
-        <h3 style="margin-top:0; color:#f8fafc; font-size:18px;">修改密码</h3>
-        <form onsubmit="return handleChangePassword(event, 'sub-pwd')">
+        <h3 style="margin-top:0; color:#f8fafc; font-size:18px;">修改登录密码</h3>
+        <p style="color:#94a3b8; font-size:13px; margin-bottom:16px;">
+          密码需为 8-100 位，且必须包含大写字母、小写字母、数字及特殊字符（如 !@#$% 等）。修改成功后其他设备的历史登录会话将自动注销失效。
+        </p>
+        <form onsubmit="return handleChangePassword(event, 'profile-pwd')">
           <div class="form-group">
-            <label>原密码 *</label>
-            <input type="password" id="sub-pwd-old" class="form-control" required placeholder="输入当前使用的密码" />
+            <label>当前原密码 *</label>
+            <input type="password" id="profile-pwd-old" class="form-control" required placeholder="输入当前使用的旧密码" />
           </div>
           <div class="form-group">
-            <label>新密码 * (需包含大小写字母、数字及特殊符号)</label>
-            <input type="password" id="sub-pwd-new" class="form-control" required placeholder="输入新密码" />
+            <label>新登录密码 * (8位以上，含大小写字母、数字及特殊符号)</label>
+            <input type="password" id="profile-pwd-new" class="form-control" required placeholder="输入新密码" />
           </div>
           <div class="form-group">
-            <label>确认新密码 *</label>
-            <input type="password" id="sub-pwd-confirm" class="form-control" required placeholder="再次输入新密码" />
+            <label>再次确认新密码 *</label>
+            <input type="password" id="profile-pwd-confirm" class="form-control" required placeholder="再次输入新密码" />
           </div>
-          <button type="submit" class="btn btn-primary" id="sub-change-pwd-btn">确认修改密码</button>
-          <span id="sub-pwd-msg" style="margin-left:12px; font-size:13px;"></span>
+          <div style="display:flex; align-items:center;">
+            <button type="submit" class="btn btn-primary" id="profile-pwd-btn">确认修改密码</button>
+            <span id="profile-pwd-msg" style="margin-left:12px; font-size:13px;"></span>
+          </div>
         </form>
       </div>
     </section>
@@ -1334,16 +1361,101 @@ async function checkAuth() {
   }
 }
 
+function renderProfileTab() {
+  if (!currentUser) return;
+  const roleMap = {
+    administrator: '超级管理员 (administrator)',
+    author: '创作者 (author)',
+    subscriber: '普通读者 (subscriber)'
+  };
+  const roleLabel = roleMap[currentUser.role] || currentUser.role;
+  const usernameEl = document.getElementById('profile-username');
+  const nameInput = document.getElementById('profile-display-name-input');
+  const emailEl = document.getElementById('profile-email');
+  const roleEl = document.getElementById('profile-role');
+
+  if (usernameEl) usernameEl.innerText = currentUser.username || '-';
+  if (nameInput) {
+    nameInput.value = currentUser.display_name || currentUser.username || '';
+  }
+  if (emailEl) emailEl.innerText = currentUser.email || '-';
+  if (roleEl) roleEl.innerHTML = '<span class="badge" style="background:#1e293b; color:#38bdf8; border:1px solid #38bdf8;">' + escapeHtml(roleLabel) + '</span>';
+}
+
+async function handleUpdateProfile(e) {
+  e.preventDefault();
+  const display_name = document.getElementById('profile-display-name-input')?.value;
+  const btn = document.getElementById('profile-save-btn');
+  const msg = document.getElementById('profile-msg');
+
+  if (!display_name || !display_name.trim()) {
+    if (msg) {
+      msg.style.color = '#ef4444';
+      msg.innerText = '显示昵称不能为空';
+    }
+    return false;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = '正在保存...';
+  }
+  if (msg) msg.innerText = '';
+
+  try {
+    const res = await fetch('/api/auth/profile', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Action': 'true' },
+      body: JSON.stringify({ display_name: display_name.trim() })
+    });
+    const data = await res.json();
+    if (res.ok) {
+      if (msg) {
+        msg.style.color = '#10b981';
+        msg.innerText = '显示昵称已成功更新！';
+      }
+      if (currentUser) {
+        currentUser.display_name = data.user.display_name;
+        const roleMap = {
+          administrator: '超级管理员',
+          author: '创作者',
+          subscriber: '普通读者'
+        };
+        const roleLabel = roleMap[currentUser.role] || currentUser.role;
+        const infoEl = document.getElementById('current-user-info');
+        if (infoEl) infoEl.innerText = '当前用户: ' + currentUser.display_name + ' (' + roleLabel + ')';
+      }
+      renderProfileTab();
+    } else {
+      if (msg) {
+        msg.style.color = '#ef4444';
+        msg.innerText = data.error || '更新失败';
+      }
+    }
+  } catch {
+    if (msg) {
+      msg.style.color = '#ef4444';
+      msg.innerText = '网络连接错误';
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = '保存昵称修改';
+    }
+  }
+  return false;
+}
+
 function applyRoleView(role) {
-  const adminNavs = ['nav-overview', 'nav-posts', 'nav-editor', 'nav-comments', 'nav-users', 'nav-media', 'nav-hotp', 'nav-oauth', 'nav-backup', 'nav-options'];
+  const allNavs = ['nav-overview', 'nav-posts', 'nav-editor', 'nav-comments', 'nav-users', 'nav-media', 'nav-hotp', 'nav-oauth', 'nav-backup', 'nav-options', 'nav-profile'];
   if (role === 'subscriber') {
-    adminNavs.forEach(id => {
+    allNavs.forEach(id => {
       const el = document.getElementById(id);
-      if (el) el.style.display = 'none';
+      if (el) el.style.display = id === 'nav-profile' ? 'block' : 'none';
     });
     showTab('subscriber');
   } else if (role === 'author') {
-    ['nav-overview', 'nav-posts', 'nav-editor', 'nav-media'].forEach(id => {
+    ['nav-overview', 'nav-posts', 'nav-editor', 'nav-media', 'nav-profile'].forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'block';
     });
@@ -1353,7 +1465,7 @@ function applyRoleView(role) {
     });
     showTab('posts');
   } else {
-    adminNavs.forEach(id => {
+    allNavs.forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = 'block';
     });
@@ -1627,7 +1739,7 @@ async function handleLogout() {
 }
 
 function showTab(name) {
-  const tabs = ['overview', 'posts', 'editor', 'comments', 'users', 'media', 'hotp', 'oauth', 'backup', 'options', 'subscriber'];
+  const tabs = ['overview', 'posts', 'editor', 'comments', 'users', 'media', 'hotp', 'oauth', 'backup', 'options', 'profile', 'subscriber'];
   tabs.forEach(t => {
     const el = document.getElementById('tab-' + t);
     const nav = document.getElementById('nav-' + t);
@@ -1645,6 +1757,7 @@ function showTab(name) {
     loadOAuthLogs();
   }
   if (name === 'options') initThemeComparison();
+  if (name === 'profile') renderProfileTab();
 }
 
 async function loadOverview() {
@@ -2427,6 +2540,10 @@ async function editPost(id) {
   const data = await res.json();
   if (data.post) {
     const p = data.post;
+    if (currentUser && currentUser.role !== 'administrator' && p.author_id !== currentUser.id) {
+      alert('您没有修改他人文章的权限');
+      return;
+    }
     document.getElementById('edit-post-id').value = p.id;
     document.getElementById('post-title').value = p.title;
     document.getElementById('post-slug').value = p.slug;
@@ -2489,10 +2606,11 @@ async function deletePost(id) {
     method: 'DELETE',
     headers: { 'X-Admin-Action': 'true' }
   });
+  const data = await res.json().catch(() => ({}));
   if (res.ok) {
     loadPosts();
   } else {
-    alert('删除失败');
+    alert(data.error || '删除失败');
   }
 }
 
