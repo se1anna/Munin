@@ -979,17 +979,56 @@ ${THEME_DARK_CSS}
       </div>
     </section>
 
-    <!-- 7. Backup Tab -->
+    <!-- 7. Backup & Restore Tab -->
     <section id="tab-backup" style="display:none;">
       <div class="admin-header">
-        <h2>全站数据一键备份</h2>
+        <h2>全站数据备份与全量恢复</h2>
       </div>
-      <div class="post-card">
-        <h3 style="margin-top:0; color:#f8fafc;">Durable Objects 结构化数据库导出</h3>
-        <p style="color:#94a3b8; font-size:14px; line-height:1.6;">
-          将数据库中的所有用户、文章、分类、标签、评论、媒体元数据及站点设置打包为 JSON 文件下载到本地。
+
+      <!-- 1. Export Card -->
+      <div class="post-card" style="margin-bottom:24px;">
+        <h3 style="margin-top:0; color:#f8fafc; font-size:18px;">Durable Objects 结构化数据库导出</h3>
+        <p style="color:#94a3b8; font-size:14px; line-height:1.6; margin-bottom:16px;">
+          将数据库中的所有文章、分类、标签、评论、媒体元数据、站点配置及用户列表打包为 JSON 备份文件下载到本地保存。
         </p>
-        <a href="/api/admin/backup" class="btn btn-primary" download>下载数据备份</a>
+        <a href="/api/admin/backup" class="btn btn-primary" download style="display:inline-block; text-decoration:none;">下载 JSON 数据备份</a>
+      </div>
+
+      <!-- 2. Import & Restore Card -->
+      <div class="post-card">
+        <h3 style="margin-top:0; color:#f8fafc; font-size:18px;">从 JSON 备份文件导入与恢复</h3>
+        <p style="color:#94a3b8; font-size:14px; line-height:1.6; margin-bottom:16px;">
+          选择此前导出的 <code>blog-backup-*.json</code> 备份文件，系统将把文章、分类、标签、评论、媒体元数据及配置快速还原至 Durable Objects 数据库中，并自动刷新全网边缘缓存。
+        </p>
+
+        <form onsubmit="return handleRestoreBackup(event)">
+          <div class="form-group">
+            <label>选择备份文件 (*.json) *</label>
+            <input type="file" id="backup-file-input" accept=".json,application/json" class="form-control" required style="padding:8px 12px; background:#0f172a;" />
+          </div>
+
+          <div class="form-group">
+            <label>恢复模式 *</label>
+            <select id="backup-restore-mode" class="form-control" style="width:auto; min-width:280px;">
+              <option value="merge" selected>增量合并模式 (保留现有数据，仅插入或更新同名项 - 推荐)</option>
+              <option value="overwrite">全量覆盖模式 (清空当前文章/评论等内容表，全量以备份为准)</option>
+            </select>
+          </div>
+
+          <div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.2); border-radius:8px; padding:12px 16px; font-size:13px; color:#f87171; margin-bottom:16px;">
+            ⚠️ <strong>风险提示</strong>：恢复操作将向数据库直接写入数据并覆盖同名项。建议在执行恢复前，先点击上方按钮下载当前数据库的一份最新备份。
+          </div>
+
+          <div style="display:flex; align-items:center; gap:12px;">
+            <button type="submit" class="btn btn-primary" id="restore-submit-btn" style="background:#0284c7;">开始执行数据恢复</button>
+            <span id="restore-msg" style="font-size:13px;"></span>
+          </div>
+        </form>
+
+        <div id="restore-stats-box" style="display:none; margin-top:20px; padding:16px; background:#0f172a; border-radius:8px; border:1px solid #1e293b;">
+          <h4 style="margin:0 0 10px 0; color:#38bdf8; font-size:14px;">恢复完成统计：</h4>
+          <div id="restore-stats-content" style="font-size:13px; color:#cbd5e1; line-height:1.8;"></div>
+        </div>
       </div>
     </section>
 
@@ -3259,6 +3298,83 @@ async function saveOptions(e) {
     setTimeout(() => msg.innerText = '', 2000);
   } else {
     alert('保存设置失败');
+  }
+  return false;
+}
+
+async function handleRestoreBackup(e) {
+  e.preventDefault();
+  const fileInput = document.getElementById('backup-file-input');
+  const mode = document.getElementById('backup-restore-mode')?.value || 'merge';
+  const btn = document.getElementById('restore-submit-btn');
+  const msg = document.getElementById('restore-msg');
+  const statsBox = document.getElementById('restore-stats-box');
+  const statsContent = document.getElementById('restore-stats-content');
+
+  if (!fileInput.files || fileInput.files.length === 0) {
+    alert('请先选择要导入的 JSON 备份文件');
+    return false;
+  }
+
+  const file = fileInput.files[0];
+  const modeText = mode === 'overwrite' ? '【全量覆盖模式】' : '【增量合并模式】';
+  if (!confirm('确认使用备份文件「' + file.name + '」执行 ' + modeText + ' 数据恢复？')) {
+    return false;
+  }
+
+  btn.disabled = true;
+  btn.innerText = '正在读取与解析文件...';
+  msg.style.color = '#38bdf8';
+  msg.innerText = '正在读取备份文件...';
+  if (statsBox) statsBox.style.display = 'none';
+
+  try {
+    const text = await file.text();
+    const backup_data = JSON.parse(text);
+
+    btn.innerText = '正在写入数据库并刷新边缘缓存...';
+    msg.innerText = '正在写入 Durable Objects 数据库...';
+
+    const res = await fetch('/api/admin/restore', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Admin-Action': 'true'
+      },
+      body: JSON.stringify({ backup_data, mode })
+    });
+
+    const data = await res.json();
+    if (res.ok) {
+      msg.style.color = '#10b981';
+      msg.innerText = '数据恢复成功！';
+      alert(data.message || '数据已成功恢复并已刷新全网边缘缓存！');
+
+      if (statsBox && statsContent && data.stats) {
+        const s = data.stats;
+        statsContent.innerHTML = 
+          '• 恢复文章: <strong>' + (s.posts || 0) + '</strong> 篇<br/>' +
+          '• 恢复分类: <strong>' + (s.categories || 0) + '</strong> 个<br/>' +
+          '• 恢复标签: <strong>' + (s.tags || 0) + '</strong> 个<br/>' +
+          '• 恢复评论: <strong>' + (s.comments || 0) + '</strong> 条<br/>' +
+          '• 恢复媒体元数据: <strong>' + (s.media || 0) + '</strong> 条<br/>' +
+          '• 恢复站点配置: <strong>' + (s.options || 0) + '</strong> 项';
+        statsBox.style.display = 'block';
+      }
+
+      loadOverview();
+    } else {
+      msg.style.color = '#ef4444';
+      msg.innerText = data.error || '数据恢复失败';
+      alert(data.error || '数据恢复失败');
+    }
+  } catch (err) {
+    msg.style.color = '#ef4444';
+    msg.innerText = '解析文件失败或网络错误: ' + (err.message || err);
+    alert('解析备份 JSON 文件失败，请确认文件格式有效');
+  } finally {
+    btn.disabled = false;
+    btn.innerText = '开始执行数据恢复';
   }
   return false;
 }

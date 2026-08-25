@@ -70,6 +70,52 @@ apiAdminRoutes.get(
   }
 );
 
+// 3.1. Full Data Backup JSON Restore / Import (Rate limited: 2 per 60s)
+apiAdminRoutes.post(
+  "/restore",
+  rateLimit({
+    keyPrefix: "admin_restore",
+    limit: 2,
+    windowSeconds: 60,
+    errorMessage: "数据恢复请求过于频繁，请稍后再试"
+  }),
+  async (c) => {
+    let body: any = {};
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: "请求格式错误，必须为合法 JSON 数据" }, 400);
+    }
+
+    const { backup_data, mode = "merge" } = body;
+    if (!backup_data || typeof backup_data !== "object") {
+      return c.json({ error: "请提供有效的 JSON 备份数据内容" }, 400);
+    }
+
+    if (mode !== "merge" && mode !== "overwrite") {
+      return c.json({ error: "恢复模式仅支持 merge (合并) 或 overwrite (覆盖)" }, 400);
+    }
+
+    const blogDO = getBlogDOStub(c);
+    try {
+      const result = await (blogDO as any).importFullBackup(backup_data, { mode });
+
+      // Purge all KV caches across the edge
+      if (c.env.CACHE_KV) {
+        await purgeAllKVCache(c.env.CACHE_KV);
+      }
+
+      return c.json({
+        success: true,
+        message: mode === "overwrite" ? "全量覆盖还原数据成功，边缘缓存已同步刷新" : "增量合并恢复数据成功，边缘缓存已同步刷新",
+        stats: result.stats
+      });
+    } catch (err: any) {
+      return c.json({ error: "数据恢复失败: " + (err.message || "未知错误") }, 500);
+    }
+  }
+);
+
 // 4. Categories Management
 apiAdminRoutes.get("/categories", async (c) => {
   const blogDO = getBlogDOStub(c);

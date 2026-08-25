@@ -1181,6 +1181,214 @@ export class BlogDO extends DurableObject<Env> {
       media_metadata: mediaMetadata
     };
   }
+
+  public async importFullBackup(
+    backupData: BlogBackupData,
+    options: { mode?: "overwrite" | "merge" } = {}
+  ): Promise<{
+    success: boolean;
+    stats: {
+      options: number;
+      posts: number;
+      categories: number;
+      tags: number;
+      comments: number;
+      media: number;
+      users: number;
+    };
+  }> {
+    this.ensureSchema();
+    const mode = options.mode || "merge";
+
+    if (!backupData || typeof backupData !== "object") {
+      throw new Error("无效的备份文件数据格式");
+    }
+
+    const stats = {
+      options: 0,
+      posts: 0,
+      categories: 0,
+      tags: 0,
+      comments: 0,
+      media: 0,
+      users: 0
+    };
+
+    // If overwrite mode, clear content tables first (preserving current session users)
+    if (mode === "overwrite") {
+      this.ctx.storage.sql.exec("DELETE FROM post_terms");
+      this.ctx.storage.sql.exec("DELETE FROM comments");
+      this.ctx.storage.sql.exec("DELETE FROM posts");
+      this.ctx.storage.sql.exec("DELETE FROM categories");
+      this.ctx.storage.sql.exec("DELETE FROM tags");
+      this.ctx.storage.sql.exec("DELETE FROM media_metadata");
+    }
+
+    // 1. Restore site options
+    if (backupData.site_options && typeof backupData.site_options === "object") {
+      for (const [key, value] of Object.entries(backupData.site_options)) {
+        if (typeof value === "string") {
+          this.ctx.storage.sql.exec(
+            "INSERT OR REPLACE INTO site_options (key, value) VALUES (?, ?)",
+            key,
+            value
+          );
+          stats.options++;
+        }
+      }
+    }
+
+    // 2. Restore categories
+    if (Array.isArray(backupData.categories)) {
+      for (const cat of backupData.categories) {
+        if (cat.id && cat.name && cat.slug) {
+          this.ctx.storage.sql.exec(
+            "INSERT OR REPLACE INTO categories (id, name, slug) VALUES (?, ?, ?)",
+            cat.id,
+            cat.name,
+            cat.slug
+          );
+          stats.categories++;
+        }
+      }
+    }
+
+    // 3. Restore tags
+    if (Array.isArray(backupData.tags)) {
+      for (const tag of backupData.tags) {
+        if (tag.id && tag.name && tag.slug) {
+          this.ctx.storage.sql.exec(
+            "INSERT OR REPLACE INTO tags (id, name, slug) VALUES (?, ?, ?)",
+            tag.id,
+            tag.name,
+            tag.slug
+          );
+          stats.tags++;
+        }
+      }
+    }
+
+    // 4. Restore posts
+    if (Array.isArray(backupData.posts)) {
+      for (const post of backupData.posts) {
+        if (post.id && post.title && post.slug) {
+          this.ctx.storage.sql.exec(
+            `INSERT OR REPLACE INTO posts (
+              id, slug, title, content_html, content_raw, excerpt, status, author_id, featured_image, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            post.id,
+            post.slug,
+            post.title,
+            post.content_html || "",
+            post.content_raw || "",
+            post.excerpt || "",
+            post.status || "draft",
+            post.author_id || "admin",
+            post.featured_image || "",
+            post.created_at || new Date().toISOString(),
+            post.updated_at || new Date().toISOString()
+          );
+          stats.posts++;
+        }
+      }
+    }
+
+    // 5. Restore post_terms
+    if (Array.isArray(backupData.post_terms)) {
+      for (const pt of backupData.post_terms) {
+        if (pt.post_id && pt.term_id && pt.term_type) {
+          this.ctx.storage.sql.exec(
+            "INSERT OR IGNORE INTO post_terms (post_id, term_id, term_type) VALUES (?, ?, ?)",
+            pt.post_id,
+            pt.term_id,
+            pt.term_type
+          );
+        }
+      }
+    }
+
+    // 6. Restore comments
+    if (Array.isArray(backupData.comments)) {
+      for (const c of backupData.comments) {
+        if (c.id && c.post_id && c.content) {
+          this.ctx.storage.sql.exec(
+            `INSERT OR REPLACE INTO comments (
+              id, post_id, parent_id, author_name, author_email, content, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            c.id,
+            c.post_id,
+            c.parent_id || null,
+            c.author_name || "匿名",
+            (c.author_email || "").toLowerCase(),
+            c.content,
+            c.status || "approved",
+            c.created_at || new Date().toISOString()
+          );
+          stats.comments++;
+        }
+      }
+    }
+
+    // 7. Restore media metadata
+    if (Array.isArray(backupData.media_metadata)) {
+      for (const m of backupData.media_metadata) {
+        if (m.id && m.filename && m.r2_key) {
+          this.ctx.storage.sql.exec(
+            `INSERT OR REPLACE INTO media_metadata (
+              id, filename, mime_type, size, r2_key, uploader_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            m.id,
+            m.filename,
+            m.mime_type || "application/octet-stream",
+            m.size || 0,
+            m.r2_key,
+            m.uploader_id || null,
+            m.created_at || new Date().toISOString()
+          );
+          stats.media++;
+        }
+      }
+    }
+
+    // 8. Safe restore users
+    if (Array.isArray(backupData.users)) {
+      for (const u of backupData.users) {
+        if (u.id && u.username && u.email) {
+          const existing = this.queryRows<User>("SELECT id, password_hash FROM users WHERE id = ? OR email = ?", u.id, u.email.toLowerCase());
+          if (existing.length === 0) {
+            const pwdHash = (u as any).password_hash || "RESTORED_USER_MUST_RESET_PASSWORD";
+            this.ctx.storage.sql.exec(
+              `INSERT INTO users (id, username, email, password_hash, role, display_name, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              u.id,
+              u.username,
+              u.email.toLowerCase(),
+              pwdHash,
+              u.role || "subscriber",
+              u.display_name || u.username,
+              u.created_at || new Date().toISOString(),
+              u.updated_at || new Date().toISOString()
+            );
+            stats.users++;
+          } else {
+            this.ctx.storage.sql.exec(
+              `UPDATE users SET display_name = ?, role = ?, updated_at = ? WHERE id = ?`,
+              u.display_name || u.username,
+              u.role || "subscriber",
+              new Date().toISOString(),
+              existing[0].id
+            );
+            stats.users++;
+          }
+        }
+      }
+    }
+
+    // Invalidate edge caches
+    await this.invalidateCache();
+
+    return { success: true, stats };
+  }
 }
 
 // ⚠️ SECURITY: Sanitize footer HTML to prevent stored XSS while allowing basic formatting
