@@ -38,6 +38,14 @@ export function renderFullHtmlPage(ctx: PageRenderContext): string {
   <meta name="twitter:title" content="${escapeHtml(ctx.pageTitle || ctx.site.site_name)}" />
   <meta name="twitter:description" content="${escapeHtml(description)}" />
 
+  <!-- Favicons & Touch Icons -->
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="icon" type="image/x-icon" sizes="16x16" href="/favicon/head-16x16.ico" />
+  <link rel="icon" type="image/x-icon" sizes="32x32" href="/favicon/head-32x32.ico" />
+  <link rel="icon" type="image/x-icon" sizes="48x48" href="/favicon/head-48x48.ico" />
+  <link rel="icon" type="image/x-icon" sizes="64x64" href="/favicon/head-64x64.ico" />
+  <link rel="apple-touch-icon" sizes="128x128" href="/favicon/head-128x128.ico" />
+
   <!-- RSS & Feed -->
   <link rel="alternate" type="application/rss+xml" title="${escapeHtml(ctx.site.site_name)}" href="/feed.xml" />
   <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml" />

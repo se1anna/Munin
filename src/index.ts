@@ -16,6 +16,7 @@ import { apiAdminRoutes } from "./routes/api-admin";
 import { mediaDistributionRoutes } from "./routes/media";
 import { oauthRoutes, getOIDCDiscovery } from "./routes/oauth";
 import { renderAdminPageHtml } from "./views/admin-view";
+import { getFaviconBytes } from "./assets/favicon";
 
 // Export Durable Object classes for Cloudflare Workers runtime
 export { BlogDO };
@@ -25,6 +26,30 @@ const app = new Hono<HonoEnv>();
 // Global Middlewares
 app.use("/*", securityHeadersMiddleware);
 app.use("/*", optionalAuthMiddleware);
+
+// Favicon & Static Icon Routes
+app.get("/favicon.ico", (c) => {
+  const bytes = getFaviconBytes("head-32x32.ico") || getFaviconBytes("icon-32x32.ico");
+  if (!bytes) return c.notFound();
+  return new Response(bytes, {
+    headers: {
+      "Content-Type": "image/x-icon",
+      "Cache-Control": "public, max-age=604800, immutable"
+    }
+  });
+});
+
+app.get("/favicon/:filename", (c) => {
+  const filename = c.req.param("filename");
+  const bytes = getFaviconBytes(filename);
+  if (!bytes) return c.notFound();
+  return new Response(bytes, {
+    headers: {
+      "Content-Type": "image/x-icon",
+      "Cache-Control": "public, max-age=604800, immutable"
+    }
+  });
+});
 
 // OpenID Connect Discovery standard endpoint
 app.get("/.well-known/openid-configuration", (c) => {
@@ -78,6 +103,7 @@ app.notFound(async (c) => {
 <head>
   <meta charset="UTF-8" />
   <title>404 未找到 - ${site.site_name}</title>
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
   <style>
     body { background:#0d0f12; color:#e2e8f0; font-family:-apple-system,sans-serif; text-align:center; padding:80px 20px; margin:0; }
     a { color:#38bdf8; text-decoration:none; }

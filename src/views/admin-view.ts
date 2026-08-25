@@ -10,6 +10,10 @@ export function renderAdminPageHtml(site: SiteOptions, turnstileSiteKey?: string
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>控制台 - ${site.site_name}</title>
+  <!-- Favicons -->
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="icon" type="image/x-icon" sizes="32x32" href="/favicon/head-32x32.ico" />
+  <link rel="apple-touch-icon" sizes="128x128" href="/favicon/head-128x128.ico" />
   <script src="https://cdnjs.cloudflare.com/ajax/libs/markdown-it/13.0.2/markdown-it.min.js"></script>
   <style>
 ${THEME_DARK_CSS}
@@ -697,7 +701,10 @@ ${THEME_DARK_CSS}
   <!-- Sidebar -->
   <aside class="admin-sidebar">
     <div class="admin-brand">
-      <span>控制台</span>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <img src="/favicon/head-48x48.ico" alt="Logo" style="width:24px; height:24px; border-radius:4px;" />
+        <span>控制台</span>
+      </div>
       <a href="/" target="_blank" style="font-size:12px; color:#94a3b8;">查看博客 &nearr;</a>
     </div>
     <div class="admin-nav-item active" onclick="showTab('overview')" id="nav-overview">概览数据</div>
@@ -1386,7 +1393,8 @@ async function checkAuth() {
       const roleMap = {
         administrator: '超级管理员',
         author: '创作者',
-        subscriber: '普通读者'
+        subscriber: '普通读者',
+        tester: '测试人员'
       };
       const roleLabel = roleMap[currentUser.role] || currentUser.role;
       document.getElementById('current-user-info').innerText = '当前用户: ' + currentUser.display_name + ' (' + roleLabel + ')';
@@ -1405,7 +1413,8 @@ function renderProfileTab() {
   const roleMap = {
     administrator: '超级管理员 (administrator)',
     author: '创作者 (author)',
-    subscriber: '普通读者 (subscriber)'
+    subscriber: '普通读者 (subscriber)',
+    tester: '测试人员 (tester)'
   };
   const roleLabel = roleMap[currentUser.role] || currentUser.role;
   const usernameEl = document.getElementById('profile-username');
@@ -1458,7 +1467,8 @@ async function handleUpdateProfile(e) {
         const roleMap = {
           administrator: '超级管理员',
           author: '创作者',
-          subscriber: '普通读者'
+          subscriber: '普通读者',
+          tester: '测试人员'
         };
         const roleLabel = roleMap[currentUser.role] || currentUser.role;
         const infoEl = document.getElementById('current-user-info');
@@ -1487,7 +1497,13 @@ async function handleUpdateProfile(e) {
 
 function applyRoleView(role) {
   const allNavs = ['nav-overview', 'nav-posts', 'nav-editor', 'nav-comments', 'nav-users', 'nav-media', 'nav-hotp', 'nav-oauth', 'nav-backup', 'nav-options', 'nav-profile'];
-  if (role === 'subscriber') {
+  if (role === 'subscriber' || role === 'tester') {
+    allNavs.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = id === 'nav-profile' ? 'block' : 'none';
+    });
+    showTab('subscriber');
+  } else if (role === 'author') {
     allNavs.forEach(id => {
       const el = document.getElementById(id);
       if (el) el.style.display = id === 'nav-profile' ? 'block' : 'none';
@@ -2730,7 +2746,8 @@ async function loadUsers() {
   const roleOptions = [
     { value: 'administrator', label: '超级管理员 (Admin)' },
     { value: 'author', label: '创作者 (Author)' },
-    { value: 'subscriber', label: '普通读者 (Subscriber)' }
+    { value: 'subscriber', label: '普通读者 (Subscriber)' },
+    { value: 'tester', label: '测试人员 (Tester)' }
   ];
 
   tbody.innerHTML = data.users.map(u => {

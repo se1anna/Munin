@@ -35,6 +35,9 @@ const ROLE_PERMISSIONS: Record<UserRole, Permission[]> = {
   ],
   subscriber: [
     "post_comment"
+  ],
+  tester: [
+    "post_comment"
   ]
 };
 

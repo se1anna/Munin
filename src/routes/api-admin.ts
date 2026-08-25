@@ -281,7 +281,7 @@ apiAdminRoutes.get("/users", async (c) => {
 apiAdminRoutes.put("/users/:id/role", async (c) => {
   const id = c.req.param("id");
   const { role } = await c.req.json();
-  if (!role || !["administrator", "author", "subscriber"].includes(role)) {
+  if (!role || !["administrator", "author", "subscriber", "tester"].includes(role)) {
     return c.json({ error: "无效的用户角色" }, 400);
   }
 

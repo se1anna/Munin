@@ -450,6 +450,10 @@ oauthRoutes.get("/login", (c) => {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>统一身份单点登录</title>
+  <!-- Favicons -->
+  <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+  <link rel="icon" type="image/x-icon" sizes="32x32" href="/favicon/head-32x32.ico" />
+  <link rel="apple-touch-icon" sizes="128x128" href="/favicon/head-128x128.ico" />
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script>
   <style>
     :root {
@@ -480,6 +484,14 @@ oauthRoutes.get("/login", (c) => {
       width: 100%;
       max-width: 420px;
       box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+    }
+    .sso-logo {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      display: block;
+      margin: 0 auto 16px auto;
+      box-shadow: 0 0 15px rgba(56, 189, 248, 0.25);
     }
     .sso-title {
       font-size: 22px;
@@ -540,6 +552,7 @@ oauthRoutes.get("/login", (c) => {
 </head>
 <body>
   <div class="sso-card">
+    <img src="/favicon/head-128x128.ico" alt="Logo" class="sso-logo" />
     <h2 class="sso-title">统一身份单点登录</h2>
     <p class="sso-desc">登录您的通行证账号以继续访问接入系统</p>
 
