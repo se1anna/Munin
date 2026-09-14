@@ -1,5 +1,15 @@
 import { Env } from "../types/env";
 
+function escapeHtml(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 export interface EmailOptions {
   to: string;
   subject: string;
@@ -107,22 +117,24 @@ export async function sendCommentNotificationEmail(
   const siteName = env.SITE_NAME || "极简边缘博客";
   const actionType = data.isReply ? "回复了您的评论" : "发表了新评论";
   const subject = `【${siteName}】文章《${data.postTitle}》收到了新互动`;
-  const sanitizedContent = data.commentContent.slice(0, 500).replace(/\n/g, "<br/>");
+  // ⚠️ SECURITY: these values come from the anonymous comment form, so they must be
+  // escaped before they are embedded in the notification HTML.
+  const sanitizedContent = escapeHtml(data.commentContent.slice(0, 500)).replace(/\n/g, "<br/>");
 
   const html = `
     <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 560px; margin: 0 auto; padding: 28px; background: #121212; color: #e5e7eb; border-radius: 8px; border: 1px solid #27272a;">
-      <h2 style="margin-top: 0; color: #f9fafb; font-size: 20px; border-bottom: 1px solid #27272a; padding-bottom: 14px;">${siteName} 互动提醒</h2>
+      <h2 style="margin-top: 0; color: #f9fafb; font-size: 20px; border-bottom: 1px solid #27272a; padding-bottom: 14px;">${escapeHtml(siteName)} 互动提醒</h2>
       <p style="font-size: 15px; color: #d1d5db; line-height: 1.6;">
-        访客 <strong>${data.commenterName}</strong> 在文章 <strong>《${data.postTitle}》</strong> 下${actionType}：
+        访客 <strong>${escapeHtml(data.commenterName)}</strong> 在文章 <strong>《${escapeHtml(data.postTitle)}》</strong> 下${actionType}：
       </p>
       <div style="background: #18181b; border-left: 3px solid #38bdf8; border-radius: 4px; padding: 14px 16px; margin: 18px 0; color: #e5e7eb; font-size: 14px; line-height: 1.6;">
         ${sanitizedContent}
       </div>
       <p style="margin: 24px 0;">
-        <a href="${data.postUrl}" style="display: inline-block; background: #2563eb; color: #ffffff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 500;">查看文章详情</a>
+        <a href="${escapeHtml(data.postUrl)}" style="display: inline-block; background: #2563eb; color: #ffffff; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-size: 14px; font-weight: 500;">查看文章详情</a>
       </p>
       <hr style="border: none; border-top: 1px solid #27272a; margin: 24px 0;" />
-      <p style="font-size: 12px; color: #6b7280; text-align: center;">此邮件由 ${siteName} 自动通知系统发送。</p>
+      <p style="font-size: 12px; color: #6b7280; text-align: center;">此邮件由 ${escapeHtml(siteName)} 自动通知系统发送。</p>
     </div>
   `;
 

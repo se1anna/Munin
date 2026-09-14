@@ -18,6 +18,21 @@ import {
 import { OAuthClient } from "../types/oauth";
 import { hashPassword } from "../auth/session";
 import { invalidatePostAndFeeds } from "../services/cache";
+import { hasTheme } from "../themes";
+
+// Keys the admin UI may write into site_options
+const SITE_OPTION_KEYS = new Set([
+  "site_name",
+  "site_description",
+  "site_url",
+  "posts_per_page",
+  "allow_comments",
+  "active_theme",
+  "footer_html"
+]);
+
+// Roles a backup restore is allowed to assign
+const RESTORABLE_ROLES = new Set<UserRole>(["administrator", "author", "subscriber", "tester"]);
 
 export class BlogDO extends DurableObject<Env> {
   private initialized = false;
@@ -183,13 +198,17 @@ export class BlogDO extends DurableObject<Env> {
   }
 
   // --- KV Invalidation Helpers ---
-  private async invalidateCache(slugs: string[] = []): Promise<void> {
+  private async invalidateCache(
+    slugs: string[] = [],
+    categorySlugs: string[] = [],
+    tagSlugs: string[] = []
+  ): Promise<void> {
     try {
       if (slugs.length === 0) {
-        await invalidatePostAndFeeds(this.env.CACHE_KV);
+        await invalidatePostAndFeeds(this.env.CACHE_KV, undefined, categorySlugs, tagSlugs);
       } else {
         for (const slug of slugs) {
-          await invalidatePostAndFeeds(this.env.CACHE_KV, slug);
+          await invalidatePostAndFeeds(this.env.CACHE_KV, slug, categorySlugs, tagSlugs);
         }
       }
     } catch {
@@ -220,19 +239,30 @@ export class BlogDO extends DurableObject<Env> {
   public async updateSiteOptions(options: Partial<SiteOptions>): Promise<void> {
     this.ensureSchema();
     for (const [key, value] of Object.entries(options)) {
-      if (value !== undefined) {
-        let sanitizedValue = String(value);
-        // ⚠️ SECURITY: Sanitize footer_html to prevent stored XSS
-        if (key === "footer_html" && typeof value === "string") {
-          sanitizedValue = sanitizeFooterHtml(value);
-        }
-        this.ctx.storage.sql.exec(
-          `INSERT INTO site_options (key, value) VALUES (?, ?)
-           ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-          key,
-          sanitizedValue
-        );
+      if (value === undefined) continue;
+      // Only known option keys are persisted; the admin endpoint forwards its body.
+      if (!SITE_OPTION_KEYS.has(key)) continue;
+
+      let sanitizedValue = String(value);
+      // ⚠️ SECURITY: Sanitize footer_html to prevent stored XSS
+      if (key === "footer_html" && typeof value === "string") {
+        sanitizedValue = sanitizeFooterHtml(value);
       }
+      // Never persist a theme id that is not installed, or every render would throw.
+      if (key === "active_theme" && !hasTheme(sanitizedValue)) {
+        continue;
+      }
+      if (key === "posts_per_page") {
+        const perPage = parseInt(sanitizedValue, 10);
+        if (!Number.isFinite(perPage)) continue;
+        sanitizedValue = String(Math.min(100, Math.max(1, perPage)));
+      }
+      this.ctx.storage.sql.exec(
+        `INSERT INTO site_options (key, value) VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        key,
+        sanitizedValue
+      );
     }
     await this.invalidateCache();
   }
@@ -299,9 +329,10 @@ export class BlogDO extends DurableObject<Env> {
     this.ensureSchema();
     try {
       const rows = this.queryRows<{ token_version: number }>("SELECT token_version FROM users WHERE id = ?", userId);
-      return rows[0]?.token_version ?? 1;
+      // ⚠️ SECURITY: 0 for unknown/deleted users so no issued token can match it.
+      return rows[0]?.token_version ?? 0;
     } catch {
-      return 1;
+      return 0;
     }
   }
 
@@ -508,7 +539,8 @@ export class BlogDO extends DurableObject<Env> {
       }
       return {
         id: r.id,
-        client_secret_hash: r.client_secret_hash,
+        // ⚠️ SECURITY: never hand the secret hash to the admin UI or API responses.
+        client_secret_hash: "",
         client_name: r.client_name,
         redirect_uris: uris,
         scopes: r.scopes,
@@ -815,9 +847,14 @@ export class BlogDO extends DurableObject<Env> {
       this.setPostTerms(id, data.category_ids || [], data.tag_ids || []);
     }
 
-    await this.invalidateCache([data.slug]);
+    const created = await this.getPostById(id);
+    await this.invalidateCache(
+      [data.slug],
+      (created?.categories || []).map((c) => c.slug),
+      (created?.tags || []).map((t) => t.slug)
+    );
 
-    return (await this.getPostById(id))!;
+    return created!;
   }
 
   public async updatePost(
@@ -869,9 +906,14 @@ export class BlogDO extends DurableObject<Env> {
       this.setPostTerms(id, catIds, tagIds);
     }
 
-    await this.invalidateCache([oldSlug, newSlug]);
+    const updated = await this.getPostById(id);
+    await this.invalidateCache(
+      [oldSlug, newSlug],
+      (updated?.categories || []).map((c) => c.slug),
+      (updated?.tags || []).map((t) => t.slug)
+    );
 
-    return this.getPostById(id);
+    return updated;
   }
 
   public async deletePost(id: string): Promise<boolean> {
@@ -883,7 +925,11 @@ export class BlogDO extends DurableObject<Env> {
     this.ctx.storage.sql.exec("DELETE FROM post_terms WHERE post_id = ?", id);
     this.ctx.storage.sql.exec("DELETE FROM comments WHERE post_id = ?", id);
 
-    await this.invalidateCache([post.slug]);
+    await this.invalidateCache(
+      [post.slug],
+      (post.categories || []).map((c) => c.slug),
+      (post.tags || []).map((t) => t.slug)
+    );
     return true;
   }
 
@@ -1160,7 +1206,11 @@ export class BlogDO extends DurableObject<Env> {
       siteOptions[r.key] = r.value;
     }
 
-    const users = this.queryRows<Omit<User, "password_hash">>("SELECT id, username, email, role, display_name, created_at, updated_at FROM users");
+    // Password hashes stay out of the export on purpose; token_version is included
+    // so a restore does not invalidate every existing session.
+    const users = this.queryRows<Omit<User, "password_hash">>(
+      "SELECT id, username, email, role, display_name, token_version, created_at, updated_at FROM users"
+    );
     const posts = this.queryRows<Post>("SELECT * FROM posts");
     const categories = this.queryRows<Category>("SELECT * FROM categories");
     const tags = this.queryRows<Tag>("SELECT * FROM tags");
@@ -1228,10 +1278,13 @@ export class BlogDO extends DurableObject<Env> {
     if (backupData.site_options && typeof backupData.site_options === "object") {
       for (const [key, value] of Object.entries(backupData.site_options)) {
         if (typeof value === "string") {
+          // ⚠️ SECURITY: a restored footer_html is rendered into every page, so it
+          // must pass the same sanitizer as the normal admin update path.
+          const restoredValue = key === "footer_html" ? sanitizeFooterHtml(value) : value;
           this.ctx.storage.sql.exec(
             "INSERT OR REPLACE INTO site_options (key, value) VALUES (?, ?)",
             key,
-            value
+            restoredValue
           );
           stats.options++;
         }
@@ -1354,27 +1407,43 @@ export class BlogDO extends DurableObject<Env> {
     if (Array.isArray(backupData.users)) {
       for (const u of backupData.users) {
         if (u.id && u.username && u.email) {
-          const existing = this.queryRows<User>("SELECT id, password_hash FROM users WHERE id = ? OR email = ?", u.id, u.email.toLowerCase());
+          const existing = this.queryRows<User>("SELECT id, password_hash, role, token_version FROM users WHERE id = ? OR email = ?", u.id, u.email.toLowerCase());
+          // Keep the original hash when the backup carries one; otherwise fall back to
+          // the row already stored for this id/email. An export without hashes must not
+          // overwrite a working credential with an unusable placeholder.
+          const pwdHash = (u as any).password_hash || existing[0]?.password_hash;
+          if (!pwdHash) {
+            console.warn("[Backup Import] Skipping user without a usable password hash:", u.username);
+            continue;
+          }
+          const tokenVersion = Number.isInteger((u as any).token_version) ? (u as any).token_version : 1;
+          // Reject unknown roles rather than persisting an arbitrary string
+          const role: UserRole = RESTORABLE_ROLES.has(u.role as UserRole) ? (u.role as UserRole) : "subscriber";
           if (existing.length === 0) {
-            const pwdHash = (u as any).password_hash || "RESTORED_USER_MUST_RESET_PASSWORD";
             this.ctx.storage.sql.exec(
-              `INSERT INTO users (id, username, email, password_hash, role, display_name, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              `INSERT INTO users (id, username, email, password_hash, role, display_name, token_version, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
               u.id,
               u.username,
               u.email.toLowerCase(),
               pwdHash,
-              u.role || "subscriber",
+              role,
               u.display_name || u.username,
+              tokenVersion,
               u.created_at || new Date().toISOString(),
               u.updated_at || new Date().toISOString()
             );
             stats.users++;
           } else {
+            // A role change must revoke existing sessions, exactly like updateUserRole,
+            // otherwise the old role stays valid inside issued JWTs.
+            const roleChanged = existing[0].role !== role;
+            const nextVersion = roleChanged ? (existing[0].token_version || 1) + 1 : existing[0].token_version || 1;
             this.ctx.storage.sql.exec(
-              `UPDATE users SET display_name = ?, role = ?, updated_at = ? WHERE id = ?`,
+              `UPDATE users SET display_name = ?, role = ?, token_version = ?, updated_at = ? WHERE id = ?`,
               u.display_name || u.username,
-              u.role || "subscriber",
+              role,
+              nextVersion,
               new Date().toISOString(),
               existing[0].id
             );
@@ -1391,17 +1460,19 @@ export class BlogDO extends DurableObject<Env> {
   }
 }
 
-// ⚠️ SECURITY: Sanitize footer HTML to prevent stored XSS while allowing basic formatting
+// ⚠️ SECURITY: footer HTML is injected into every public page and into a <textarea>
+// in the admin UI. Drop whole dangerous elements (with their content) and every
+// event handler / script URL, including entity-encoded variants.
+const FOOTER_DANGEROUS_TAGS = /<(script|style|iframe|object|embed|applet|form|svg|math|link|meta|base|template)\b[\s\S]*?<\/\1\s*>/gi;
+const FOOTER_VOID_DANGEROUS_TAGS = /<\/?(script|style|iframe|object|embed|applet|form|svg|math|link|meta|base|template)\b[^>]*>/gi;
+const FOOTER_EVENT_ATTR = /\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi;
+const FOOTER_SCRIPT_URL = /(?:javascript|vbscript|data)\s*:/gi;
+
 function sanitizeFooterHtml(html: string): string {
   if (!html) return "";
   return html
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
-    .replace(/<iframe[\s\S]*?<\/iframe>/gi, "")
-    .replace(/<object[\s\S]*?<\/object>/gi, "")
-    .replace(/<embed[\s\S]*?>/gi, "")
-    .replace(/on\w+\s*=\s*"[^"]*"/gi, "")
-    .replace(/on\w+\s*=\s*'[^']*'/gi, "")
-    .replace(/on\w+\s*=\s*\S+/gi, "")
-    .replace(/javascript\s*:/gi, "blocked:")
-    .replace(/<link[\s\S]*?>/gi, "");
+    .replace(FOOTER_DANGEROUS_TAGS, "")
+    .replace(FOOTER_VOID_DANGEROUS_TAGS, "")
+    .replace(FOOTER_EVENT_ATTR, "")
+    .replace(FOOTER_SCRIPT_URL, "blocked:");
 }

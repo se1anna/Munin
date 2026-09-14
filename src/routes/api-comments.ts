@@ -60,6 +60,16 @@ apiCommentsRoutes.post(
       return c.json({ error: "关联文章不存在" }, 404);
     }
 
+    // Comments are closed on unpublished posts and when the site option is off
+    if (post.status !== "published") {
+      return c.json({ error: "该文章尚未发布，暂不接受评论" }, 403);
+    }
+
+    const site = await (blogDO as any).getSiteOptions();
+    if (!site.allow_comments) {
+      return c.json({ error: "站点已关闭评论功能" }, 403);
+    }
+
     // 4. Determine comment status:
     // Admins and authors are auto-approved; anonymous/readers require moderation (status: "pending")
     let commentStatus: "approved" | "pending" = "pending";
@@ -84,7 +94,6 @@ apiCommentsRoutes.post(
     });
 
     // Asynchronous Throttled Email Notification Loop
-    const site = await (blogDO as any).getSiteOptions();
     const postUrl = `${site.site_url}/post/${post.slug}#comment-${comment.id}`;
 
     // Notify Admin or Author
