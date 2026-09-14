@@ -202,7 +202,7 @@ export class SSREngine {
     }
 
     const site = await this.blogDO.getSiteOptions();
-    const { posts } = await this.blogDO.listPosts({
+    const { posts, total } = await this.blogDO.listPosts({
       status: "published",
       page: 1,
       limit: 100
@@ -220,7 +220,8 @@ export class SSREngine {
         currentPage: 1,
         totalPages: 1,
         archiveTitle: "全站归档",
-        archiveDescription: `共 ${posts.length} 篇已发布文章`,
+        // Report the real published count, not the size of the capped page
+        archiveDescription: `共 ${total} 篇已发布文章`,
         currentYear,
         themeCSS: "",
         contentHtml: ""

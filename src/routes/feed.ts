@@ -1,9 +1,24 @@
 import { Hono } from "hono";
 import { HonoEnv } from "../types/env";
 import { getCachedResponse, setCachedResponse, getFeedRssCacheKey, getSitemapCacheKey } from "../services/cache";
-import { escapeHtml } from "../themes/default-dark/templates";
 
 export const feedRoutes = new Hono<HonoEnv>();
+
+// ⚠️ SECURITY: a literal "]]>" inside CDATA terminates the section early, so post
+// titles / excerpts must be split before being wrapped.
+function cdata(value: unknown): string {
+  return String(value ?? "").replace(/\]\]>/g, "]]]]><![CDATA[>");
+}
+
+// Escapes a value for XML text and attribute contexts
+function xmlEscape(value: unknown): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
 
 function getBlogDOStub(c: any) {
   const id = c.env.BLOG_DO.idFromName("global-blog-instance");
@@ -35,12 +50,12 @@ feedRoutes.get("/feed.xml", async (c) => {
       const postUrl = `${site.site_url}/post/${p.slug}`;
       return `
     <item>
-      <title><![CDATA[${p.title}]]></title>
-      <link>${postUrl}</link>
-      <guid isPermaLink="true">${postUrl}</guid>
+      <title><![CDATA[${cdata(p.title)}]]></title>
+      <link>${xmlEscape(postUrl)}</link>
+      <guid isPermaLink="true">${xmlEscape(postUrl)}</guid>
       <pubDate>${pubDate}</pubDate>
-      <description><![CDATA[${p.excerpt || ""}]]></description>
-      ${p.author_name ? `<dc:creator><![CDATA[${p.author_name}]]></dc:creator>` : ""}
+      <description><![CDATA[${cdata(p.excerpt)}]]></description>
+      ${p.author_name ? `<dc:creator><![CDATA[${cdata(p.author_name)}]]></dc:creator>` : ""}
     </item>`;
     })
     .join("\n");
@@ -48,12 +63,12 @@ feedRoutes.get("/feed.xml", async (c) => {
   const rssXml = `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title><![CDATA[${site.site_name}]]></title>
-    <link>${site.site_url}</link>
-    <description><![CDATA[${site.site_description}]]></description>
+    <title><![CDATA[${cdata(site.site_name)}]]></title>
+    <link>${xmlEscape(site.site_url)}</link>
+    <description><![CDATA[${cdata(site.site_description)}]]></description>
     <language>zh-CN</language>
     <lastBuildDate>${nowRfc822}</lastBuildDate>
-    <atom:link href="${site.site_url}/feed.xml" rel="self" type="application/rss+xml" />
+    <atom:link href="${xmlEscape(`${site.site_url}/feed.xml`)}" rel="self" type="application/rss+xml" />
     ${itemsXml}
   </channel>
 </rss>`;
@@ -87,12 +102,12 @@ feedRoutes.get("/sitemap.xml", async (c) => {
 
   let urls = `
   <url>
-    <loc>${site.site_url}/</loc>
+    <loc>${xmlEscape(`${site.site_url}/`)}</loc>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>${site.site_url}/archive</loc>
+    <loc>${xmlEscape(`${site.site_url}/archive`)}</loc>
     <changefreq>daily</changefreq>
     <priority>0.8</priority>
   </url>`;
@@ -101,8 +116,8 @@ feedRoutes.get("/sitemap.xml", async (c) => {
     const lastMod = p.updated_at ? p.updated_at.split("T")[0] : "";
     urls += `
   <url>
-    <loc>${site.site_url}/post/${p.slug}</loc>
-    ${lastMod ? `<lastmod>${lastMod}</lastmod>` : ""}
+    <loc>${xmlEscape(`${site.site_url}/post/${p.slug}`)}</loc>
+    ${lastMod ? `<lastmod>${xmlEscape(lastMod)}</lastmod>` : ""}
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>`;
@@ -111,7 +126,7 @@ feedRoutes.get("/sitemap.xml", async (c) => {
   for (const cat of categories) {
     urls += `
   <url>
-    <loc>${site.site_url}/category/${cat.slug}</loc>
+    <loc>${xmlEscape(`${site.site_url}/category/${cat.slug}`)}</loc>
     <changefreq>weekly</changefreq>
     <priority>0.6</priority>
   </url>`;
@@ -120,7 +135,7 @@ feedRoutes.get("/sitemap.xml", async (c) => {
   for (const tag of tags) {
     urls += `
   <url>
-    <loc>${site.site_url}/tag/${tag.slug}</loc>
+    <loc>${xmlEscape(`${site.site_url}/tag/${tag.slug}`)}</loc>
     <changefreq>weekly</changefreq>
     <priority>0.5</priority>
   </url>`;

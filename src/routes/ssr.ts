@@ -24,7 +24,7 @@ ssrRoutes.get(
 
     c.header("Content-Type", "text/html; charset=utf-8");
     c.header("X-Edge-Cache", fromCache ? "HIT" : "MISS");
-    c.header("Cache-Control", "no-cache, s-maxage=3600");
+    c.header("Cache-Control", "no-cache, must-revalidate");
     return c.body(html);
   }
 );
@@ -38,7 +38,7 @@ const handleArchive = async (c: any) => {
 
   c.header("Content-Type", "text/html; charset=utf-8");
   c.header("X-Edge-Cache", fromCache ? "HIT" : "MISS");
-  c.header("Cache-Control", "no-cache, s-maxage=3600");
+  c.header("Cache-Control", "no-cache, must-revalidate");
   return c.body(html);
 };
 
@@ -64,7 +64,7 @@ ssrRoutes.get(
 
     c.header("Content-Type", "text/html; charset=utf-8");
     c.header("X-Edge-Cache", fromCache ? "HIT" : "MISS");
-    c.header("Cache-Control", notFound ? "no-cache" : "no-cache, s-maxage=3600");
+    c.header("Cache-Control", notFound ? "no-cache" : "no-cache, must-revalidate");
     return c.body(html, notFound ? 404 : 200);
   }
 );
@@ -88,7 +88,7 @@ ssrRoutes.get(
 
     c.header("Content-Type", "text/html; charset=utf-8");
     c.header("X-Edge-Cache", fromCache ? "HIT" : "MISS");
-    c.header("Cache-Control", "no-cache, s-maxage=3600");
+    c.header("Cache-Control", "no-cache, must-revalidate");
     return c.body(html);
   }
 );
@@ -112,7 +112,7 @@ ssrRoutes.get(
 
     c.header("Content-Type", "text/html; charset=utf-8");
     c.header("X-Edge-Cache", fromCache ? "HIT" : "MISS");
-    c.header("Cache-Control", "no-cache, s-maxage=3600");
+    c.header("Cache-Control", "no-cache, must-revalidate");
     return c.body(html);
   }
 );
