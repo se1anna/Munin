@@ -1,4 +1,5 @@
 import MarkdownIt from "markdown-it";
+import { sanitizeActiveHtml } from "../utils/html-sanitizer";
 
 export const md = new MarkdownIt({
   html: true,
@@ -78,6 +79,20 @@ export interface ParsedMarkdownBlock {
 /**
  * Parses raw Markdown text into structured blocks
  */
+
+// These predicates are shared by the branch dispatch AND the paragraph collector.
+// Keeping one definition prevents the two from diverging, which previously left
+// lines such as "#include <x.h>" matching no branch at all.
+const isHeadingLine = (s: string): boolean => /^#{1,6}\s+(.+)$/.test(s);
+const isTableLine = (s: string): boolean => s.startsWith("|") && s.endsWith("|");
+const isSeparatorLine = (s: string): boolean => /^(-{3,}|\*{3,}|_{3,})$/.test(s);
+const isUnorderedItem = (s: string): boolean => /^[-*+]\s+/.test(s);
+const isOrderedItem = (s: string): boolean => /^\d+\.\s+/.test(s);
+const isFenceLine = (s: string): boolean => s.startsWith("```") || s.startsWith("~~~");
+const isBlockquoteLine = (s: string): boolean => s.startsWith(">");
+const isImageLine = (s: string): boolean =>
+  /^!\[([^\]]*)\]\(([^)"'\s]+)(?:\s+["']([^"']*)["'])?\)$/.test(s);
+
 export function parseMarkdownToBlocks(markdown: string): ParsedMarkdownBlock[] {
   if (!markdown || !markdown.trim()) {
     return [{ type: "paragraph", content: "" }];
@@ -130,17 +145,17 @@ export function parseMarkdownToBlocks(markdown: string): ParsedMarkdownBlock[] {
     }
 
     // 3. Separator: ---, ***, ___
-    if (/^(\-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+    if (isSeparatorLine(trimmed)) {
       blocks.push({ type: "separator" });
       i++;
       continue;
     }
 
     // 4. Blockquote: > quote
-    if (trimmed.startsWith(">")) {
+    if (isBlockquoteLine(trimmed)) {
       const quoteLines: string[] = [];
       let cite = "";
-      while (i < lines.length && lines[i].trim().startsWith(">")) {
+      while (i < lines.length && isBlockquoteLine(lines[i].trim())) {
         const qLine = lines[i].trim().replace(/^>\s?/, "");
         if (qLine.startsWith("——") || qLine.startsWith("--") || qLine.startsWith("- ")) {
           cite = qLine.replace(/^([—\-]{1,2}\s?)/, "").trim();
@@ -158,9 +173,9 @@ export function parseMarkdownToBlocks(markdown: string): ParsedMarkdownBlock[] {
     }
 
     // 5. Table: | col1 | col2 |
-    if (trimmed.startsWith("|") && trimmed.endsWith("|")) {
+    if (isTableLine(trimmed)) {
       const tableLines: string[] = [];
-      while (i < lines.length && lines[i].trim().startsWith("|") && lines[i].trim().endsWith("|")) {
+      while (i < lines.length && isTableLine(lines[i].trim())) {
         tableLines.push(lines[i].trim());
         i++;
       }
@@ -172,9 +187,9 @@ export function parseMarkdownToBlocks(markdown: string): ParsedMarkdownBlock[] {
     }
 
     // 6. Unordered List: - item, * item, + item
-    if (/^[-*+]\s+/.test(trimmed)) {
+    if (isUnorderedItem(trimmed)) {
       const items: string[] = [];
-      while (i < lines.length && /^[-*+]\s+/.test(lines[i].trim())) {
+      while (i < lines.length && isUnorderedItem(lines[i].trim())) {
         items.push(lines[i].trim().replace(/^[-*+]\s+/, ""));
         i++;
       }
@@ -187,9 +202,9 @@ export function parseMarkdownToBlocks(markdown: string): ParsedMarkdownBlock[] {
     }
 
     // 7. Ordered List: 1. item
-    if (/^\d+\.\s+/.test(trimmed)) {
+    if (isOrderedItem(trimmed)) {
       const items: string[] = [];
-      while (i < lines.length && /^\d+\.\s+/.test(lines[i].trim())) {
+      while (i < lines.length && isOrderedItem(lines[i].trim())) {
         items.push(lines[i].trim().replace(/^\d+\.\s+/, ""));
         i++;
       }
@@ -219,15 +234,14 @@ export function parseMarkdownToBlocks(markdown: string): ParsedMarkdownBlock[] {
     while (
       i < lines.length &&
       lines[i].trim() &&
-      !lines[i].trim().startsWith("```") &&
-      !lines[i].trim().startsWith("~~~") &&
-      !lines[i].trim().startsWith("#") &&
-      !lines[i].trim().startsWith(">") &&
-      !lines[i].trim().startsWith("|") &&
-      !/^[-*+]\s+/.test(lines[i].trim()) &&
-      !/^\d+\.\s+/.test(lines[i].trim()) &&
-      !/^(\-{3,}|\*{3,}|_{3,})$/.test(lines[i].trim()) &&
-      !/^!\[([^\]]*)\]\(([^)"'\s]+)(?:\s+["']([^"']*)["'])?\)$/.test(lines[i].trim())
+      !isFenceLine(lines[i].trim()) &&
+      !isHeadingLine(lines[i].trim()) &&
+      !isBlockquoteLine(lines[i].trim()) &&
+      !isTableLine(lines[i].trim()) &&
+      !isUnorderedItem(lines[i].trim()) &&
+      !isOrderedItem(lines[i].trim()) &&
+      !isSeparatorLine(lines[i].trim()) &&
+      !isImageLine(lines[i].trim())
     ) {
       pLines.push(lines[i]);
       i++;
@@ -238,6 +252,9 @@ export function parseMarkdownToBlocks(markdown: string): ParsedMarkdownBlock[] {
         type: "paragraph",
         content: pLines.join("\n")
       });
+    } else {
+      // Safety net: emit the unmatched line so the outer loop always advances.
+      blocks.push({ type: "paragraph", content: trimmed });
     }
   }
 
@@ -269,8 +286,9 @@ export function markdownToGutenberg(markdown: string): string {
         return `<!-- wp:image -->\n<figure class="wp-block-image"><img src="${escapeAttr(b.url || "")}" alt="${escapeAttr(b.alt || "")}" />${fig}</figure>\n<!-- /wp:image -->`;
       }
       if (b.type === "code") {
-        const langAttr = b.lang ? ` {"language":"${escapeAttr(b.lang)}"}` : "";
-        const langClass = b.lang ? ` class="language-${escapeAttr(b.lang)}"` : "";
+        const lang = sanitizeFenceLang(b.lang || "");
+        const langAttr = lang ? ` {"language":"${lang}"}` : "";
+        const langClass = lang ? ` class="language-${lang}"` : "";
         return `<!-- wp:code${langAttr} -->\n<pre class="wp-block-code"><code${langClass}>${escapeHtml(b.code || "")}</code></pre>\n<!-- /wp:code -->`;
       }
       if (b.type === "quote") {
@@ -305,16 +323,33 @@ export function parseGutenbergBlocks(content: string): GutenbergBlock[] {
     return parseGutenbergBlocks(gutenbergFormatted);
   }
 
-  // Matches either self-closing <!-- wp:name {attrs} /--> or paired <!-- wp:name {attrs} -->...<!-- /wp:name -->
-  const blockRegex = /<!--\s+wp:([a-z0-9\/-]+)(?:\s+(\{[\s\S]*?\}))?\s+(?:\/-->|-->([\s\S]*?)<!--\s+\/wp:\1\s+-->)/g;
   const blocks: GutenbergBlock[] = [];
   let lastIndex = 0;
-  let match: RegExpExecArray | null;
 
-  while ((match = blockRegex.exec(content)) !== null) {
+  // Locate every real block start in one linear pass. The previous single global regex
+  // paired a lazy inner scan with a backreference, so an opening marker with no closer
+  // made the engine rescan the whole document from each position (quadratic).
+  const ANCHORED_BLOCK_REGEX = /^<!--\s+wp:([a-z0-9\/-]+)(?:\s+(\{[\s\S]*?\}))?\s+(?:\/-->|-->([\s\S]*?)<!--\s+\/wp:\1\s+-->)/;
+  const startPositions = new Set<number>();
+  const anchorScanRegex = /<!--\s+wp:/g;
+  let anchorMatch: RegExpExecArray | null;
+  while ((anchorMatch = anchorScanRegex.exec(content)) !== null) {
+    // The anchored match is bounded: the inner scan can only run to the matching
+    // closer, so an unclosed opener costs a failing scan instead of a full rescan.
+    if (ANCHORED_BLOCK_REGEX.test(content.slice(anchorMatch.index))) {
+      startPositions.add(anchorMatch.index);
+    }
+  }
+
+  for (const start of Array.from(startPositions).sort((a, b) => a - b)) {
+    const anchored = ANCHORED_BLOCK_REGEX.exec(content.slice(start));
+    if (!anchored) continue;
+
+    const blockName = anchored[1];
+
     // Check for raw text before this block
-    if (match.index > lastIndex) {
-      const freeHtml = content.substring(lastIndex, match.index).trim();
+    if (start > lastIndex) {
+      const freeHtml = content.substring(lastIndex, start).trim();
       if (freeHtml) {
         blocks.push({
           blockName: null,
@@ -325,27 +360,26 @@ export function parseGutenbergBlocks(content: string): GutenbergBlock[] {
       }
     }
 
-    const blockName = match[1];
     let attrs: Record<string, any> = {};
-    if (match[2]) {
+    if (anchored[2]) {
       try {
-        attrs = JSON.parse(match[2]);
+        attrs = JSON.parse(anchored[2]);
       } catch {
         attrs = {};
       }
     }
 
-    let innerContent = (match[3] || "").trim();
+    let innerContent = (anchored[3] || "").trim();
 
     // Render inline markdown for paragraph, quote, heading, list, code blocks if present
     if (blockName === "paragraph" || blockName === "core/paragraph") {
-      innerContent = innerContent.replace(/<p>([\s\S]*?)<\/p>/gi, (_, pInner) => `<p>${renderInlineMarkdown(pInner)}</p>`);
+      innerContent = innerContent.replace(/<p>([\s\S]*?)<\/p>/gi, (_, pInner) => `<p>${renderInlineMarkdown(unescapeQuotes(pInner))}</p>`);
     } else if (blockName === "heading" || blockName === "core/heading") {
-      innerContent = innerContent.replace(/<h([1-6])([^>]*)>([\s\S]*?)<\/h\1>/gi, (_, lvl, attrs, hInner) => `<h${lvl}${attrs}>${renderInlineMarkdown(hInner)}</h${lvl}>`);
+      innerContent = innerContent.replace(/<h([1-6])([^>]*)>([\s\S]*?)<\/h\1>/gi, (_, lvl, attrs, hInner) => `<h${lvl}${attrs}>${renderInlineMarkdown(unescapeQuotes(hInner))}</h${lvl}>`);
     } else if (blockName === "quote" || blockName === "core/quote") {
-      innerContent = innerContent.replace(/<p>([\s\S]*?)<\/p>/gi, (_, pInner) => `<p>${renderInlineMarkdown(pInner)}</p>`);
+      innerContent = innerContent.replace(/<p>([\s\S]*?)<\/p>/gi, (_, pInner) => `<p>${renderInlineMarkdown(unescapeQuotes(pInner))}</p>`);
     } else if (blockName === "list" || blockName === "core/list") {
-      innerContent = innerContent.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, liInner) => `<li>${renderInlineMarkdown(liInner)}</li>`);
+      innerContent = innerContent.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, liInner) => `<li>${renderInlineMarkdown(unescapeQuotes(liInner))}</li>`);
     } else if (blockName === "code" || blockName === "core/code") {
       innerContent = innerContent.replace(/<pre[^>]*><code([^>]*)>([\s\S]*?)<\/code><\/pre>/gi, (_, codeAttrs, rawCode) => {
         const cleanCode = unescapeHtml(rawCode);
@@ -360,7 +394,7 @@ export function parseGutenbergBlocks(content: string): GutenbergBlock[] {
       innerHTML: innerContent
     });
 
-    lastIndex = blockRegex.lastIndex;
+    lastIndex = start + anchored[0].length;
   }
 
   if (lastIndex < content.length) {
@@ -395,7 +429,7 @@ export function renderGutenbergHtml(content: string): string {
   }
 
   const blocks = parseGutenbergBlocks(content);
-  return blocks
+  const html = blocks
     .map((b) => {
       if (!b.blockName || b.blockName === "core/freeform") {
         return `<div class="wp-block-freeform entry-content-block">${b.innerHTML}</div>`;
@@ -403,9 +437,14 @@ export function renderGutenbergHtml(content: string): string {
       return b.innerHTML;
     })
     .join("\n");
+
+  // ⚠️ SECURITY: this HTML is persisted and echoed raw by every theme. Authors may
+  // submit raw HTML, so script-bearing markup is stripped before it is stored.
+  // Inline scripts are left alone here; they carry the generated block data.
+  return sanitizeActiveHtml(html, { stripScriptUrls: false });
 }
 
-function unescapeHtml(str: string): string {
+export function unescapeHtml(str: string): string {
   if (!str) return "";
   return str
     .replace(/&amp;/g, "&")
@@ -416,7 +455,16 @@ function unescapeHtml(str: string): string {
     .replace(/&#x27;/g, "'");
 }
 
-function escapeHtml(str: string): string {
+export function unescapeQuotes(str: string): string {
+  if (!str) return "";
+  return str
+    .replace(/&amp;quot;/g, '"')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&#x27;/g, "'");
+}
+
+export function escapeHtml(str: string): string {
   if (!str) return "";
   return str
     .replace(/&/g, "&amp;")
@@ -428,7 +476,18 @@ function escapeHtml(str: string): string {
 
 function escapeAttr(str: string): string {
   if (!str) return "";
-  return str.replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+// The fence info string lands inside a Gutenberg comment (`<!-- wp:code {...} -->`),
+// so it must not be able to close that comment or inject markup.
+function sanitizeFenceLang(lang: string): string {
+  return (lang || "").replace(/-->/g, "").replace(/[<>"']/g, "").trim();
 }
 
 /**
