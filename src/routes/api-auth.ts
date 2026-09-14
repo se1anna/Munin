@@ -72,8 +72,10 @@ apiAuthRoutes.post(
       );
     }
 
-    // Generate 6-digit numeric verification code
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
+    // Generate 6-digit numeric verification code using a CSPRNG
+    const codeBytes = new Uint32Array(1);
+    crypto.getRandomValues(codeBytes);
+    const code = String(100000 + (codeBytes[0] % 900000));
 
     const blogDO = getBlogDOStub(c);
     await (blogDO as any).saveVerificationCode(cleanEmail, code, purpose, 300);
@@ -167,13 +169,21 @@ apiAuthRoutes.post(
     const role = userCount === 0 ? "administrator" : "subscriber";
 
     const passwordHash = await hashPassword(password);
-    const newUser = await (blogDO as any).createUser({
-      username: cleanUsername,
-      email: cleanEmail,
-      password_hash: passwordHash,
-      role,
-      display_name: display_name ? String(display_name).slice(0, 50) : cleanUsername
-    });
+    let newUser: any;
+    try {
+      newUser = await (blogDO as any).createUser({
+        username: cleanUsername,
+        email: cleanEmail,
+        password_hash: passwordHash,
+        role,
+        display_name: display_name ? String(display_name).slice(0, 50) : cleanUsername
+      });
+    } catch (err) {
+      // Concurrent registration racing the uniqueness pre-check hits the SQLite
+      // UNIQUE constraint; report it as a normal conflict instead of a 500.
+      console.warn("[Register] createUser rejected:", err);
+      return c.json({ error: "该邮箱或用户名已被注册" }, 409);
+    }
 
     // Consume verification code only after successful user creation
     await (blogDO as any).consumeCode(cleanEmail, "register");

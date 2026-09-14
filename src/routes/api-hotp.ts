@@ -2,9 +2,11 @@ import { Hono } from "hono";
 import { HonoEnv } from "../types/env";
 import { requireAuth, requireRole } from "../middleware/auth-guard";
 import { hotpAuthMiddleware } from "../middleware/hotp-auth";
+import { adminCsrfGuard } from "../middleware/security";
 import { rateLimit } from "../middleware/rate-limiter";
 import { generateHotpPool, batchWriteHotpToKV, checkHotpGenerationCooldown } from "../auth/hotp";
 import { renderGutenbergHtml } from "../engine/gutenberg";
+import { invalidatePostAndFeeds } from "../services/cache";
 
 export const apiHotpRoutes = new Hono<HonoEnv>();
 
@@ -14,7 +16,8 @@ function getBlogDOStub(c: any) {
 }
 
 // 1. Generate HOTP Pool & Non-blocking Stream Download (Admin Only, 10-Minute Cooldown)
-apiHotpRoutes.post("/admin/hotp/generate", requireAuth, requireRole(["administrator"]), async (c) => {
+// This route lives under the /api mount, so it must attach the CSRF guard itself.
+apiHotpRoutes.post("/admin/hotp/generate", requireAuth, requireRole(["administrator"]), adminCsrfGuard, async (c) => {
   // Check generation cooldown lock (10 minutes)
   const { canGenerate, resetInSeconds } = await checkHotpGenerationCooldown(c.env.HOTP_KV, 600);
   if (!canGenerate) {
@@ -58,6 +61,14 @@ apiHotpRoutes.post(
       return c.json({ error: "文章标题与内容不能为空" }, 400);
     }
 
+    if (typeof title !== "string" || typeof content_raw !== "string") {
+      return c.json({ error: "文章标题与内容必须为字符串" }, 400);
+    }
+
+    if (status !== "draft" && status !== "published") {
+      return c.json({ error: "无效的文章状态，仅支持 draft 或 published" }, 400);
+    }
+
     if (title.length > 200) {
       return c.json({ error: "文章标题超出 200 字限制" }, 400);
     }
@@ -91,6 +102,10 @@ apiHotpRoutes.post(
       tag_ids
     });
 
+    if (c.env.CACHE_KV) {
+      await invalidatePostAndFeeds(c.env.CACHE_KV, post.slug);
+    }
+
     return c.json({
       success: true,
       message: "文章已通过 HOTP 鉴权成功发布，该 HOTP 令牌已即时核销消耗",
@@ -107,10 +122,20 @@ apiHotpRoutes.get(
   async (c) => {
     const blogDO = getBlogDOStub(c);
     const comments = await (blogDO as any).listAllComments();
+    // ⚠️ SECURITY: commenter emails are PII, so they are stripped like /open/users.
+    const safeComments = comments.map((cm: any) => ({
+      id: cm.id,
+      post_id: cm.post_id,
+      parent_id: cm.parent_id,
+      author_name: cm.author_name,
+      content: cm.content,
+      status: cm.status,
+      created_at: cm.created_at
+    }));
     return c.json({
       success: true,
       message: "HOTP 令牌已核销消耗",
-      comments
+      comments: safeComments
     });
   }
 );

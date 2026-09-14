@@ -342,7 +342,7 @@ apiAdminRoutes.get("/oauth/logs", async (c) => {
   const period = c.req.query("period");
   const startDate = c.req.query("start_date");
   const endDate = c.req.query("end_date");
-  const limit = parseInt(c.req.query("limit") || "500", 10);
+  const limit = Math.min(1000, Math.max(1, parseInt(c.req.query("limit") || "500", 10) || 500));
 
   const blogDO = getBlogDOStub(c);
   const logs = await (blogDO as any).queryOAuthLogs({
@@ -359,7 +359,15 @@ apiAdminRoutes.get("/oauth/logs", async (c) => {
 });
 
 apiAdminRoutes.delete("/oauth/logs", async (c) => {
-  const { retention } = await c.req.json().catch(() => ({ retention: "all" }));
+  let body: any;
+  try {
+    body = await c.req.json();
+  } catch {
+    // ⚠️ A malformed/absent body must never default to wiping every audit record.
+    return c.json({ error: "请求格式错误，必须显式提供 retention 参数" }, 400);
+  }
+
+  const { retention } = body || {};
   if (!["all", "1d", "3d", "7d", "30d"].includes(retention)) {
     return c.json({ error: "无效的保留时段参数" }, 400);
   }
