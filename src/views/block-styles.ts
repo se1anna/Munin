@@ -279,11 +279,37 @@ a:hover {
   padding: 0;
 }
 
-.entry-content img,
-.wp-block-image img {
+img {
   max-width: 100%;
   height: auto;
+}
+
+figure {
+  margin: 0;
+}
+
+.wp-block-image, figure.wp-block-image {
+  margin: 32px auto;
+  text-align: center;
+  max-width: 100%;
+}
+
+.entry-content img,
+.wp-block-image img,
+figure.wp-block-image img {
+  max-width: 100% !important;
+  height: auto !important;
+  display: block;
+  margin: 0 auto;
   border-radius: 8px;
+}
+
+.wp-block-image figcaption,
+figure.wp-block-image figcaption {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--wp--preset--color--text-muted);
+  text-align: center;
 }
 
 .entry-content ul,

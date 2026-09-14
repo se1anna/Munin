@@ -2,6 +2,19 @@ import { SiteOptions } from "../types/blog";
 import { THEME_DARK_CSS } from "./block-styles";
 import { getAllThemeMetas } from "../themes";
 
+// ⚠️ SECURITY: build-time escaping for values folded into the page from the DB
+// (title / attribute / textarea contexts). Without it a stored "</textarea>" or a
+// stray quote breaks out of the element and executes script in the admin session.
+function esc(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 export function renderAdminPageHtml(site: SiteOptions, turnstileSiteKey?: string): string {
   const allThemes = getAllThemeMetas();
   return `<!DOCTYPE html>
@@ -9,7 +22,7 @@ export function renderAdminPageHtml(site: SiteOptions, turnstileSiteKey?: string
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>控制台 - ${site.site_name}</title>
+  <title>控制台 - ${esc(site.site_name)}</title>
   <!-- Favicons -->
   <link rel="icon" type="image/x-icon" href="/favicon.ico" />
   <link rel="icon" type="image/x-icon" sizes="32x32" href="/favicon/head-32x32.ico" />
@@ -531,6 +544,45 @@ ${THEME_DARK_CSS}
   color: #f8fafc;
   font-weight: 600;
 }
+
+.media-picker-card {
+  background: #11151c;
+  border: 1px solid #202735;
+  border-radius: 6px;
+  padding: 8px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+  overflow: hidden;
+  position: relative;
+}
+.media-picker-card:hover {
+  border-color: #38bdf8;
+  background: #18202d;
+  transform: translateY(-2px);
+}
+.media-picker-card img {
+  width: 100%;
+  height: 90px;
+  object-fit: cover;
+  border-radius: 4px;
+}
+.media-picker-card .media-title {
+  font-size: 11px;
+  color: #94a3b8;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+}
+@keyframes toast-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
   </style>
   ${turnstileSiteKey ? `<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" defer></script>` : ""}
 </head>
@@ -670,6 +722,38 @@ ${THEME_DARK_CSS}
   </div>
 </div>
 
+<!-- Media Picker & Uploader Modal -->
+<div id="media-picker-modal" class="auth-modal-overlay" style="display: none;" onclick="if(event.target===this)closeMediaPickerModal()">
+  <div class="auth-card" style="max-width:860px; width:94%; max-height:88vh; display:flex; flex-direction:column; padding:24px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #222834; padding-bottom:14px; margin-bottom:16px;">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <h3 style="margin:0; font-size:18px; color:#f8fafc;">媒体库与图片上传</h3>
+        <span style="font-size:12px; color:#64748b;" id="media-picker-status">点击图片即可直接插入正文</span>
+      </div>
+      <button type="button" class="btn" style="padding:4px 10px; font-size:12px; background:#202630; color:#94a3b8;" onclick="closeMediaPickerModal()">关闭 ✕</button>
+    </div>
+
+    <!-- Action Toolbar: Upload Button & Search -->
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px;">
+      <div style="display:flex; align-items:center; gap:10px;">
+        <input type="file" id="media-picker-file-input" accept="image/*" style="display:none;" onchange="handleMediaPickerUpload(event)" />
+        <button type="button" class="btn btn-primary" style="font-size:13px; padding:7px 16px; display:inline-flex; align-items:center; gap:6px;" onclick="document.getElementById('media-picker-file-input').click()">
+          <span>+ 本地上传新图片</span>
+        </button>
+        <span id="media-picker-upload-hint" style="font-size:12px; color:#94a3b8;">支持 JPG, PNG, WEBP, GIF, SVG (单文件最大 10MB)</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:8px;">
+        <input type="text" id="media-picker-search" class="form-control" style="width:200px; padding:6px 12px; font-size:13px;" placeholder="按文件名搜索..." oninput="filterMediaPicker(this.value)" />
+      </div>
+    </div>
+
+    <!-- Media Gallery Grid -->
+    <div id="media-picker-gallery" style="flex:1; overflow-y:auto; min-height:280px; max-height:460px; display:grid; grid-template-columns:repeat(auto-fill, minmax(140px, 1fr)); gap:14px; padding:6px 2px;">
+      <div style="grid-column:1/-1; text-align:center; padding:40px; color:#64748b;">正在加载媒体库...</div>
+    </div>
+  </div>
+</div>
+
 <!-- OAuth Logs Purge Modal -->
 <div id="oauth-purge-modal" class="auth-modal-overlay" style="display: none;" onclick="if(event.target===this)closeOAuthPurgeModal()">
   <div class="auth-card" style="max-width:460px;">
@@ -789,12 +873,13 @@ ${THEME_DARK_CSS}
             <button type="button" class="mode-tab-btn" id="btn-mode-code" onclick="switchEditorMode('code')">源码与 Markdown</button>
             <button type="button" class="mode-tab-btn" id="btn-mode-preview" onclick="switchEditorMode('preview')">实时排版预览</button>
           </div>
-          <button class="btn" style="background:#202630; color:#e2e8f0;" onclick="savePost('draft')">存为草稿</button>
-          <button class="btn btn-primary" onclick="savePost('published')">立即发布</button>
+          <button class="btn" id="btn-save-draft" style="background:#202630; color:#e2e8f0;" onclick="savePost('draft')">存为草稿</button>
+          <button class="btn btn-primary" id="btn-publish-post" onclick="savePost('published')">立即发布</button>
         </div>
       </div>
 
       <input type="hidden" id="edit-post-id" value="" />
+      <input type="hidden" id="edit-post-status" value="draft" />
       
       <!-- Article Title Input -->
       <div class="form-group" style="margin-bottom:20px;">
@@ -815,7 +900,7 @@ ${THEME_DARK_CSS}
             <label>特色封面图链接 (选填)</label>
             <div style="display:flex; gap:8px;">
               <input type="text" id="post-featured-image" class="form-control" placeholder="https://... 或 /media/..." />
-              <button type="button" class="btn" style="background:#202630; color:#cbd5e1; white-space:nowrap; font-size:12px;" onclick="showTab('media')">媒体库</button>
+              <button type="button" class="btn" style="background:#1e293b; color:#38bdf8; white-space:nowrap; font-size:12px; padding:6px 12px;" onclick="openMediaPickerForFeatured()">选择/上传图片</button>
             </div>
           </div>
         </div>
@@ -886,8 +971,8 @@ ${THEME_DARK_CSS}
       <div class="mobile-editor-bar">
         <button type="button" class="btn" style="background:#1c232f; color:#38bdf8; font-size:12px;" onclick="openBlockInserterModal()">+ 区块</button>
         <button type="button" class="btn" style="background:#1c232f; color:#e2e8f0; font-size:12px;" onclick="toggleMobilePreview()">预览</button>
-        <button type="button" class="btn" style="background:#202630; color:#e2e8f0; font-size:12px;" onclick="savePost('draft')">存草稿</button>
-        <button type="button" class="btn btn-primary" style="font-size:12px; padding:8px 14px;" onclick="savePost('published')">发布</button>
+        <button type="button" class="btn" id="btn-mobile-draft" style="background:#202630; color:#e2e8f0; font-size:12px;" onclick="savePost('draft')">存草稿</button>
+        <button type="button" class="btn btn-primary" id="btn-mobile-publish" style="font-size:12px; padding:8px 14px;" onclick="savePost('published')">发布</button>
       </div>
     </section>
 
@@ -1254,11 +1339,11 @@ ${THEME_DARK_CSS}
         <form onsubmit="return saveOptions(event)">
           <div class="form-group">
             <label>博客名称</label>
-            <input type="text" id="opt-site-name" class="form-control" value="${site.site_name}" />
+            <input type="text" id="opt-site-name" class="form-control" value="${esc(site.site_name)}" />
           </div>
           <div class="form-group">
             <label>副标题 / 描述</label>
-            <textarea id="opt-site-desc" class="form-control" rows="3">${site.site_description}</textarea>
+            <textarea id="opt-site-desc" class="form-control" rows="3">${esc(site.site_description)}</textarea>
           </div>
           <div class="form-group">
             <label>每页显示文章数</label>
@@ -1272,7 +1357,7 @@ ${THEME_DARK_CSS}
           </div>
           <div class="form-group">
             <label>页脚自定义 HTML / 备案信息 (选填，支持 &lt;a href="..."&gt; 链接)</label>
-            <textarea id="opt-footer-html" class="form-control" rows="2" placeholder="例如: &lt;a href='https://beian.miit.gov.cn/' target='_blank' rel='noopener'&gt;京ICP备xxxxxx号&lt;/a&gt; &middot; &lt;a href='#' target='_blank'&gt;公网安备 xxxx 号&lt;/a&gt;">${site.footer_html || ""}</textarea>
+            <textarea id="opt-footer-html" class="form-control" rows="2" placeholder="例如: &lt;a href='https://beian.miit.gov.cn/' target='_blank' rel='noopener'&gt;京ICP备xxxxxx号&lt;/a&gt; &middot; &lt;a href='#' target='_blank'&gt;公网安备 xxxx 号&lt;/a&gt;">${esc(site.footer_html)}</textarea>
           </div>
           <button type="submit" class="btn btn-primary" id="save-opt-btn">保存设置</button>
           <span id="opt-msg" style="margin-left:12px; font-size:13px; color:#10b981;"></span>
@@ -1379,9 +1464,82 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+function unescapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+}
+
+function escapeAttr(str) {
+  if (!str) return '';
+  return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+function showToast(message, type = 'info', duration = 3000) {
+  let container = document.getElementById('admin-toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'admin-toast-container';
+    container.style.cssText = 'position:fixed; top:24px; right:24px; z-index:99999; display:flex; flex-direction:column; gap:10px; pointer-events:none;';
+    document.body.appendChild(container);
+  }
+
+  const toast = document.createElement('div');
+  const bgMap = {
+    success: 'linear-gradient(135deg, #064e3b, #047857)',
+    error: 'linear-gradient(135deg, #7f1d1d, #991b1b)',
+    warning: 'linear-gradient(135deg, #78350f, #92400e)',
+    info: 'linear-gradient(135deg, #0f172a, #1e293b)',
+    loading: 'linear-gradient(135deg, #0f172a, #1e293b)'
+  };
+  const borderMap = {
+    success: '#10b981',
+    error: '#ef4444',
+    warning: '#f59e0b',
+    info: '#38bdf8',
+    loading: '#38bdf8'
+  };
+
+  toast.style.cssText = 'pointer-events:auto; min-width:260px; max-width:440px; padding:12px 18px; border-radius:8px; background:' + (bgMap[type] || bgMap.info) + '; border:1px solid ' + (borderMap[type] || borderMap.info) + '; color:#fff; font-size:13px; font-weight:500; box-shadow:0 10px 25px -5px rgba(0,0,0,0.5), 0 8px 10px -6px rgba(0,0,0,0.5); display:flex; align-items:center; gap:10px; opacity:0; transform:translateY(-12px); transition:all 0.25s cubic-bezier(0.16, 1, 0.3, 1);';
+
+  let icon = '<span style="color:#38bdf8; font-weight:700;">ℹ</span>';
+  if (type === 'success') icon = '<span style="color:#34d399; font-weight:700; font-size:16px;">✓</span>';
+  if (type === 'error') icon = '<span style="color:#f87171; font-weight:700; font-size:16px;">✕</span>';
+  if (type === 'warning') icon = '<span style="color:#fbbf24; font-weight:700; font-size:16px;">⚠</span>';
+  if (type === 'loading') icon = '<span style="display:inline-block; width:14px; height:14px; border:2px solid rgba(255,255,255,0.25); border-top-color:#38bdf8; border-radius:50%; animation:toast-spin 0.8s linear infinite; flex-shrink:0;"></span>';
+
+  toast.innerHTML = icon + '<span style="flex:1; line-height:1.4;">' + escapeHtml(message) + '</span>';
+
+  container.appendChild(toast);
+  requestAnimationFrame(function() {
+    toast.style.opacity = '1';
+    toast.style.transform = 'translateY(0)';
+  });
+
+  const dismiss = function() {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(-12px)';
+    setTimeout(function() {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 280);
+  };
+
+  if (duration > 0) {
+    setTimeout(dismiss, duration);
+  }
+
+  return { dismiss };
+}
+
 // Initialize
 window.addEventListener('DOMContentLoaded', async () => {
   await checkAuth();
+  startAutoSaveTimer();
 });
 
 async function checkAuth() {
@@ -1836,9 +1994,9 @@ async function loadPosts() {
   }
   tbody.innerHTML = data.posts.map(p => \`
     <tr>
-      <td><strong>\${p.title}</strong><br/><span style="font-size:12px; color:#64748b;">/post/\${p.slug}</span></td>
+      <td><strong>\${escapeHtml(p.title)}</strong><br/><span style="font-size:12px; color:#64748b;">/post/\${escapeHtml(p.slug)}</span></td>
       <td><span class="badge" style="\${p.status === 'published' ? 'background:rgba(16,185,129,0.1); color:#10b981; border-color:rgba(16,185,129,0.2);' : ''}">\${p.status === 'published' ? '已发布' : '草稿'}</span></td>
-      <td>\${p.author_name || '管理员'}</td>
+      <td>\${escapeHtml(p.author_name || '管理员')}</td>
       <td>\${p.created_at ? p.created_at.slice(0, 10) : ''}</td>
       <td>
         <button class="btn" style="padding:4px 8px; font-size:12px; background:#1e293b; color:#38bdf8;" onclick="editPost('\${p.id}')">编辑</button>
@@ -1897,6 +2055,43 @@ function renderFullMarkdown(text) {
       .replace(/<pre><code(?:\\s+class="language-([^"]+)")?>/g, '<pre class="wp-block-code"><code class="language-$1">');
   }
   return renderInlineMarkdown(escapeHtml(text));
+}
+
+// The preview renders author-supplied Gutenberg/Markdown HTML. Strip active
+// content so an author cannot execute script in the administrator's session.
+var PREVIEW_BLOCKED_TAGS = 'script,iframe,object,embed,form,base,meta,link,style,svg,math,audio,video,source,track';
+function sanitizePreviewHtml(html) {
+  if (!html) return '';
+  try {
+    var doc = new DOMParser().parseFromString('<div id="preview-root">' + html + '</div>', 'text/html');
+    var root = doc.getElementById('preview-root');
+    if (!root) return escapeHtml(html);
+
+    var blocked = root.querySelectorAll(PREVIEW_BLOCKED_TAGS);
+    for (var i = blocked.length - 1; i >= 0; i--) {
+      if (blocked[i].parentNode) blocked[i].parentNode.removeChild(blocked[i]);
+    }
+
+    var nodes = root.querySelectorAll('*');
+    for (var n = 0; n < nodes.length; n++) {
+      var el = nodes[n];
+      var attrs = Array.prototype.slice.call(el.attributes || []);
+      for (var a = 0; a < attrs.length; a++) {
+        var name = attrs[a].name.toLowerCase();
+        var value = attrs[a].value || '';
+        if (name.indexOf('on') === 0 || name === 'srcdoc' || name === 'formaction') {
+          el.removeAttribute(attrs[a].name);
+          continue;
+        }
+        if ((name === 'href' || name === 'src' || name === 'xlink:href') && /^\\s*(javascript|vbscript|data):/i.test(value)) {
+          el.removeAttribute(attrs[a].name);
+        }
+      }
+    }
+    return root.innerHTML;
+  } catch (e) {
+    return escapeHtml(html);
+  }
 }
 
 function renderTableMarkdown(tableLines) {
@@ -2140,13 +2335,13 @@ function rawGutenbergToBlockList(raw) {
     if (name === 'heading') {
       var level = attrs.level || 2;
       var text = inner.replace(/<h[1-6][^>]*>/gi, '').replace(/<\\/h[1-6]>/gi, '').trim();
-      blocks.push({ type: 'heading', level: level, content: text });
+      blocks.push({ type: 'heading', level: level, content: unescapeHtml(text) });
     } else if (name === 'paragraph') {
       var pText = inner.replace(/<p[^>]*>/gi, '').replace(/<\\/p>/gi, '').trim();
       if (pText.startsWith('<figure') || pText.startsWith('<table') || pText.startsWith('<div')) {
         blocks.push({ type: 'html', content: pText });
       } else {
-        blocks.push({ type: 'paragraph', content: pText });
+        blocks.push({ type: 'paragraph', content: unescapeHtml(pText).replace(/<br\\s*\\/?>/gi, '\\n') });
       }
     } else if (name === 'image') {
       var srcMatch = inner.match(/src=["']([^"']+)["']/i);
@@ -2154,20 +2349,20 @@ function rawGutenbergToBlockList(raw) {
       var capMatch = inner.match(/<figcaption[^>]*>([\\s\\S]*?)<\\/figcaption>/i);
       blocks.push({
         type: 'image',
-        url: srcMatch ? srcMatch[1] : '',
-        alt: altMatch ? altMatch[1] : '',
-        caption: capMatch ? capMatch[1] : ''
+        url: srcMatch ? unescapeHtml(srcMatch[1]) : '',
+        alt: altMatch ? unescapeHtml(altMatch[1]) : '',
+        caption: capMatch ? unescapeHtml(capMatch[1]) : ''
       });
     } else if (name === 'code') {
       var codeText = inner.replace(/<pre[^>]*><code[^>]*>/gi, '').replace(/<\\/code><\\/pre>/gi, '').trim();
-      blocks.push({ type: 'code', code: codeText, lang: attrs.language || '' });
+      blocks.push({ type: 'code', code: unescapeHtml(codeText), lang: attrs.language || '' });
     } else if (name === 'quote') {
       var qMatch = inner.match(/<p[^>]*>([\\s\\S]*?)<\\/p>/i);
       var citeMatch = inner.match(/<cite[^>]*>([\\s\\S]*?)<\\/cite>/i);
       blocks.push({
         type: 'quote',
-        quote: qMatch ? qMatch[1] : inner,
-        cite: citeMatch ? citeMatch[1] : ''
+        quote: unescapeHtml(qMatch ? qMatch[1] : inner).replace(/<br\\s*\\/?>/gi, '\\n'),
+        cite: unescapeHtml(citeMatch ? citeMatch[1] : '')
       });
     } else if (name === 'list') {
       var isOrdered = attrs.ordered || /<ol/i.test(inner);
@@ -2175,7 +2370,7 @@ function rawGutenbergToBlockList(raw) {
       var liRegex = /<li[^>]*>([\\s\\S]*?)<\\/li>/gi;
       var m;
       while ((m = liRegex.exec(inner)) !== null) {
-        liMatches.push(m[1]);
+        liMatches.push(unescapeHtml(m[1]));
       }
       blocks.push({
         type: 'list',
@@ -2207,26 +2402,26 @@ function blockListToRawGutenberg(blocks) {
   return blocks.map(function(b) {
     if (b.type === 'heading') {
       var lvl = b.level || 2;
-      return '<!-- wp:heading {"level":' + lvl + '} -->\\n<h' + lvl + ' class="wp-block-heading">' + escapeHtml(b.content || '') + '</h' + lvl + '>\\n<!-- /wp:heading -->';
+      return '<!-- wp:heading {"level":' + lvl + '} -->\\n<h' + lvl + ' class="wp-block-heading">' + (b.content || '') + '</h' + lvl + '>\\n<!-- /wp:heading -->';
     }
     if (b.type === 'paragraph') {
       return '<!-- wp:paragraph -->\\n<p>' + (b.content || '').replace(/\\n/g, '<br/>') + '</p>\\n<!-- /wp:paragraph -->';
     }
     if (b.type === 'image') {
-      var fig = b.caption ? '<figcaption>' + escapeHtml(b.caption) + '</figcaption>' : '';
-      return '<!-- wp:image -->\\n<figure class="wp-block-image"><img src="' + escapeHtml(b.url || '') + '" alt="' + escapeHtml(b.alt || '') + '" />' + fig + '</figure>\\n<!-- /wp:image -->';
+      var fig = b.caption ? '<figcaption>' + (b.caption || '') + '</figcaption>' : '';
+      return '<!-- wp:image -->\\n<figure class="wp-block-image"><img src="' + escapeAttr(b.url || '') + '" alt="' + escapeAttr(b.alt || '') + '" />' + fig + '</figure>\\n<!-- /wp:image -->';
     }
     if (b.type === 'code') {
-      var langAttr = b.lang ? ' {"language":"' + escapeHtml(b.lang) + '"}' : '';
+      var langAttr = b.lang ? ' {"language":"' + escapeAttr(b.lang) + '"}' : '';
       return '<!-- wp:code' + langAttr + ' -->\\n<pre class="wp-block-code"><code>' + escapeHtml(b.code || '') + '</code></pre>\\n<!-- /wp:code -->';
     }
     if (b.type === 'quote') {
-      var citeHtml = b.cite ? '<cite>' + escapeHtml(b.cite) + '</cite>' : '';
-      return '<!-- wp:quote -->\\n<blockquote class="wp-block-quote"><p>' + escapeHtml(b.quote || '') + '</p>' + citeHtml + '</blockquote>\\n<!-- /wp:quote -->';
+      var citeHtml = b.cite ? '<cite>' + (b.cite || '') + '</cite>' : '';
+      return '<!-- wp:quote -->\\n<blockquote class="wp-block-quote"><p>' + (b.quote || '').replace(/\\n/g, '<br/>') + '</p>' + citeHtml + '</blockquote>\\n<!-- /wp:quote -->';
     }
     if (b.type === 'list') {
       var tag = b.ordered ? 'ol' : 'ul';
-      var lis = (b.items || ['']).map(function(item) { return '<li>' + escapeHtml(item) + '</li>'; }).join('\\n');
+      var lis = (b.items || ['']).map(function(item) { return '<li>' + (item || '') + '</li>'; }).join('\\n');
       return '<!-- wp:list {"ordered":' + (b.ordered ? 'true' : 'false') + '} -->\\n<' + tag + ' class="wp-block-list">\\n' + lis + '\\n</' + tag + '>\\n<!-- /wp:list -->';
     }
     if (b.type === 'separator') {
@@ -2235,7 +2430,7 @@ function blockListToRawGutenberg(blocks) {
     if (b.type === 'html') {
       return '<!-- wp:html -->\\n' + (b.content || '') + '\\n<!-- /wp:html -->';
     }
-    return '<!-- wp:paragraph -->\\n<p>' + escapeHtml(b.content || '') + '</p>\\n<!-- /wp:paragraph -->';
+    return '<!-- wp:paragraph -->\\n<p>' + (b.content || '') + '</p>\\n<!-- /wp:paragraph -->';
   }).join('\\n\\n');
 }
 
@@ -2343,7 +2538,10 @@ function renderVisualBlocks() {
       typeIcon = 'IMG';
       blockBody = '<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:10px;">' +
         '<div><label style="font-size:11px; color:#94a3b8; display:block; margin-bottom:4px;">图片链接 *</label>' +
-        '<input type="text" class="form-control" value="' + escapeHtml(b.url || '') + '" placeholder="https://... 或 /media/..." oninput="updateBlockData(' + idx + ', &quot;url&quot;, this.value); renderVisualBlocks();" /></div>' +
+        '<div style="display:flex; gap:6px;">' +
+        '<input type="text" class="form-control" style="flex:1;" value="' + escapeHtml(b.url || '') + '" placeholder="https://... 或 /media/..." oninput="updateBlockData(' + idx + ', &quot;url&quot;, this.value); renderVisualBlocks();" />' +
+        '<button type="button" class="btn" style="background:#1e293b; color:#38bdf8; font-size:12px; white-space:nowrap; padding:4px 10px;" onclick="openMediaPickerForBlock(' + idx + ')">媒体库/上传</button>' +
+        '</div></div>' +
         '<div><label style="font-size:11px; color:#94a3b8; display:block; margin-bottom:4px;">说明文字 (选填)</label>' +
         '<input type="text" class="form-control" value="' + escapeHtml(b.caption || '') + '" placeholder="图片下方说明文字" oninput="updateBlockData(' + idx + ', &quot;caption&quot;, this.value)" /></div>' +
         '</div>' +
@@ -2532,7 +2730,7 @@ function updateLivePreview() {
 
   const contentEl = document.getElementById('editor-preview-content');
   if (contentEl) {
-    contentEl.innerHTML = previewHtml || '<p style="color:#64748b; font-style:italic;">暂无正文内容，请在左上角切换回「可视化区块」开始创作。</p>';
+    contentEl.innerHTML = sanitizePreviewHtml(previewHtml) || '<p style="color:#64748b; font-style:italic;">暂无正文内容，请在左上角切换回「可视化区块」开始创作。</p>';
   }
 }
 
@@ -2577,15 +2775,209 @@ function insertRawBlock(type) {
   textarea.focus();
 }
 
+// Media Picker State & Handlers
+let mediaPickerTarget = null; // { type: 'block', index: idx } | { type: 'featured' }
+let mediaPickerList = [];
+let mediaPickerSearchQuery = '';
+
+function openMediaPickerForBlock(idx) {
+  mediaPickerTarget = { type: 'block', index: idx };
+  openMediaPickerModal();
+}
+
+function openMediaPickerForFeatured() {
+  mediaPickerTarget = { type: 'featured' };
+  openMediaPickerModal();
+}
+
+function openMediaPickerModal() {
+  const modal = document.getElementById('media-picker-modal');
+  if (modal) modal.style.display = 'flex';
+  const searchInput = document.getElementById('media-picker-search');
+  if (searchInput) searchInput.value = '';
+  mediaPickerSearchQuery = '';
+  loadMediaPickerGallery();
+}
+
+function closeMediaPickerModal() {
+  const modal = document.getElementById('media-picker-modal');
+  if (modal) modal.style.display = 'none';
+  mediaPickerTarget = null;
+}
+
+async function loadMediaPickerGallery() {
+  const gallery = document.getElementById('media-picker-gallery');
+  if (!gallery) return;
+  gallery.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:40px; color:#64748b;">正在加载媒体库...</div>';
+
+  try {
+    const res = await fetch('/api/upload', { headers: { 'X-Admin-Action': 'true' } });
+    const data = await res.json();
+    if (res.ok && data.media) {
+      mediaPickerList = data.media;
+      renderMediaPickerItems();
+    } else {
+      gallery.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:30px; color:#ef4444;">' + escapeHtml(data.error || '无法加载媒体库') + '</div>';
+    }
+  } catch (err) {
+    gallery.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:30px; color:#ef4444;">加载失败，请检查网络连接</div>';
+  }
+}
+
+function renderMediaPickerItems() {
+  const gallery = document.getElementById('media-picker-gallery');
+  if (!gallery) return;
+
+  const query = (mediaPickerSearchQuery || '').toLowerCase().trim();
+  const items = mediaPickerList.filter(function(m) {
+    if (!query) return true;
+    return (m.filename || '').toLowerCase().includes(query) || (m.r2_key || '').toLowerCase().includes(query);
+  });
+
+  if (items.length === 0) {
+    gallery.innerHTML = '<div style="grid-column:1/-1; text-align:center; padding:40px 10px; color:#64748b;">' + (query ? '未找到匹配的媒体文件' : '媒体库暂无文件，点击上方「本地上传新图片」开始上传') + '</div>';
+    return;
+  }
+
+  gallery.innerHTML = items.map(function(m) {
+    const mediaUrl = '/media/' + m.r2_key.split('/').map(encodeURIComponent).join('/');
+    const isImage = !m.mime_type || m.mime_type.startsWith('image/');
+    const preview = isImage
+      ? '<img src="' + escapeAttr(mediaUrl) + '" style="width:100%; height:95px; object-fit:cover; border-radius:4px 4px 0 0;" loading="lazy" alt="' + escapeAttr(m.filename) + '" />'
+      : '<div style="height:95px; display:flex; align-items:center; justify-content:center; background:#1e293b; color:#94a3b8; font-size:24px;">📄</div>';
+
+    return '<div class="media-picker-card" onclick="selectMediaForTarget(&quot;' + escapeAttr(mediaUrl) + '&quot;, &quot;' + escapeAttr(m.filename) + '&quot;)" title="点击插入: ' + escapeAttr(m.filename) + '" style="cursor:pointer; background:#161c26; border:1px solid #232d3d; border-radius:6px; overflow:hidden; display:flex; flex-direction:column; transition:transform 0.15s, border-color 0.15s;">' +
+      preview +
+      '<div style="padding:8px; font-size:12px; display:flex; flex-direction:column; gap:2px;">' +
+      '<div style="white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#f8fafc; font-weight:500;" title="' + escapeAttr(m.filename) + '">' + escapeHtml(m.filename) + '</div>' +
+      '<div style="font-size:11px; color:#64748b;">' + (m.size ? (m.size / 1024).toFixed(1) + ' KB' : '') + '</div>' +
+      '</div></div>';
+  }).join('');
+}
+
+function filterMediaPicker(query) {
+  mediaPickerSearchQuery = query;
+  renderMediaPickerItems();
+}
+
+function selectMediaForTarget(url, filename) {
+  if (!mediaPickerTarget) return;
+
+  if (mediaPickerTarget.type === 'block') {
+    const idx = mediaPickerTarget.index;
+    if (editorBlocks[idx]) {
+      editorBlocks[idx].url = url;
+      if (!editorBlocks[idx].caption && filename) {
+        editorBlocks[idx].caption = filename;
+      }
+      renderVisualBlocks();
+    }
+  } else if (mediaPickerTarget.type === 'featured') {
+    const featuredInput = document.getElementById('post-featured-image');
+    if (featuredInput) {
+      featuredInput.value = url;
+    }
+  }
+
+  closeMediaPickerModal();
+}
+
+async function handleMediaPickerUpload(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+
+  const hintEl = document.getElementById('media-picker-upload-hint');
+  const oldHint = hintEl ? hintEl.innerHTML : '';
+  if (hintEl) {
+    hintEl.innerHTML = '<span style="color:#38bdf8;">⏳ 正在上传中...</span>';
+  }
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      headers: { 'X-Admin-Action': 'true' },
+      body: formData
+    });
+    const data = await res.json();
+    if (res.ok && data.url) {
+      if (hintEl) hintEl.innerHTML = '<span style="color:#10b981;">✓ 上传成功！正在插入...</span>';
+      selectMediaForTarget(data.url, file.name);
+    } else {
+      if (hintEl) hintEl.innerHTML = '<span style="color:#ef4444;">上传失败: ' + escapeHtml(data.error || '未知错误') + '</span>';
+      setTimeout(function() { if (hintEl) hintEl.innerHTML = oldHint; }, 4000);
+    }
+  } catch (err) {
+    if (hintEl) hintEl.innerHTML = '<span style="color:#ef4444;">上传网络错误</span>';
+    setTimeout(function() { if (hintEl) hintEl.innerHTML = oldHint; }, 4000);
+  } finally {
+    event.target.value = '';
+  }
+}
+
+// Auto-save timer and snapshot tracker
+let lastSavedSnapshot = '';
+let autoSaveTimer = null;
+
+function startAutoSaveTimer() {
+  if (autoSaveTimer) clearInterval(autoSaveTimer);
+  // Auto-save draft or published article every 2 minutes (120,000 ms) preserving status
+  autoSaveTimer = setInterval(function() {
+    const currentStatus = document.getElementById('edit-post-status')?.value || 'draft';
+    savePost(currentStatus, true);
+  }, 120000);
+}
+
+// Keyboard shortcut: Ctrl+S or Cmd+S while editing
+window.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+    const editorTab = document.getElementById('tab-editor');
+    if (editorTab && editorTab.style.display !== 'none') {
+      e.preventDefault();
+      const currentStatus = document.getElementById('edit-post-status')?.value || 'draft';
+      savePost(currentStatus, false, true);
+    }
+  }
+});
+
 function resetEditor() {
   document.getElementById('edit-post-id').value = '';
+  document.getElementById('edit-post-status').value = 'draft';
   document.getElementById('post-title').value = '';
   document.getElementById('post-slug').value = '';
   document.getElementById('post-featured-image').value = '';
   document.getElementById('post-content-raw').value = '';
   document.getElementById('post-excerpt').value = '';
   document.getElementById('editor-heading').innerText = '撰写新文章';
+  const statusEl = document.getElementById('editor-status-text');
+  if (statusEl) statusEl.innerText = '可视化区块排版模式';
+
+  const btnPublish = document.getElementById('btn-publish-post');
+  if (btnPublish) {
+    btnPublish.disabled = false;
+    btnPublish.innerHTML = '立即发布';
+    btnPublish.style.background = '';
+  }
+  const btnSave = document.getElementById('btn-save-draft');
+  if (btnSave) {
+    btnSave.disabled = false;
+    btnSave.innerHTML = '存为草稿';
+  }
+  const btnMobPub = document.getElementById('btn-mobile-publish');
+  if (btnMobPub) {
+    btnMobPub.disabled = false;
+    btnMobPub.innerHTML = '发布';
+  }
+  const btnMobDraft = document.getElementById('btn-mobile-draft');
+  if (btnMobDraft) {
+    btnMobDraft.disabled = false;
+    btnMobDraft.innerHTML = '存草稿';
+  }
+
   editorBlocks = [{ type: 'paragraph', content: '' }];
+  lastSavedSnapshot = '';
   switchEditorMode('visual');
   renderVisualBlocks();
 }
@@ -2600,6 +2992,7 @@ async function editPost(id) {
       return;
     }
     document.getElementById('edit-post-id').value = p.id;
+    document.getElementById('edit-post-status').value = p.status || 'draft';
     document.getElementById('post-title').value = p.title;
     document.getElementById('post-slug').value = p.slug;
     document.getElementById('post-featured-image').value = p.featured_image || '';
@@ -2607,7 +3000,41 @@ async function editPost(id) {
     document.getElementById('post-content-raw').value = raw;
     document.getElementById('post-excerpt').value = p.excerpt || '';
     document.getElementById('editor-heading').innerText = '编辑文章: ' + p.title;
+
+    lastSavedSnapshot = JSON.stringify({
+      title: p.title,
+      slug: p.slug,
+      featured_image: p.featured_image || '',
+      excerpt: p.excerpt || '',
+      content_raw: raw
+    });
+    const isPublished = p.status === 'published';
+    const statusEl = document.getElementById('editor-status-text');
+    if (statusEl) statusEl.innerText = '正在编辑中 (状态: ' + (isPublished ? '已发布' : '草稿') + ')';
     
+    // Update buttons according to published vs draft state
+    const btnPublish = document.getElementById('btn-publish-post');
+    if (btnPublish) {
+      btnPublish.disabled = false;
+      btnPublish.innerHTML = isPublished ? '更新发布' : '立即发布';
+      btnPublish.style.background = '';
+    }
+    const btnSave = document.getElementById('btn-save-draft');
+    if (btnSave) {
+      btnSave.disabled = false;
+      btnSave.innerHTML = isPublished ? '转为草稿' : '存为草稿';
+    }
+    const btnMobPub = document.getElementById('btn-mobile-publish');
+    if (btnMobPub) {
+      btnMobPub.disabled = false;
+      btnMobPub.innerHTML = isPublished ? '更新' : '发布';
+    }
+    const btnMobDraft = document.getElementById('btn-mobile-draft');
+    if (btnMobDraft) {
+      btnMobDraft.disabled = false;
+      btnMobDraft.innerHTML = isPublished ? '转草稿' : '存草稿';
+    }
+
     // Parse into visual blocks
     editorBlocks = rawGutenbergToBlockList(raw);
     switchEditorMode('visual');
@@ -2616,12 +3043,16 @@ async function editPost(id) {
   }
 }
 
-async function savePost(status) {
+async function savePost(status, isAutoSave = false, stayInEditor = false) {
   const id = document.getElementById('edit-post-id').value;
-  const title = document.getElementById('post-title').value;
-  const slug = document.getElementById('post-slug').value;
-  const featured_image = document.getElementById('post-featured-image').value;
-  const excerpt = document.getElementById('post-excerpt').value;
+  const currentPostStatus = document.getElementById('edit-post-status')?.value || 'draft';
+  // Auto-save must NEVER overwrite a published post to draft!
+  const targetStatus = isAutoSave ? currentPostStatus : (status || currentPostStatus || 'draft');
+
+  const title = (document.getElementById('post-title').value || '').trim();
+  const slug = (document.getElementById('post-slug').value || '').trim();
+  const featured_image = (document.getElementById('post-featured-image').value || '').trim();
+  const excerpt = (document.getElementById('post-excerpt').value || '').trim();
 
   let content_raw = '';
   if (currentEditorMode === 'visual') {
@@ -2631,27 +3062,282 @@ async function savePost(status) {
     content_raw = document.getElementById('post-content-raw').value;
   }
 
+  // If auto-save, check conditions
+  if (isAutoSave) {
+    const editorTab = document.getElementById('tab-editor');
+    if (!editorTab || editorTab.style.display === 'none') {
+      return; // Editor not currently active
+    }
+    if (!title && (!content_raw || content_raw === '<!-- wp:paragraph -->\n<p></p>\n<!-- /wp:paragraph -->')) {
+      return; // Nothing to save
+    }
+    const currentSnapshot = JSON.stringify({ title, slug, featured_image, excerpt, content_raw });
+    if (currentSnapshot === lastSavedSnapshot) {
+      return; // No changes since last save
+    }
+  }
+
   if (!title || !content_raw) {
-    alert('文章标题与内容不能为空');
+    if (!isAutoSave) {
+      showToast('文章标题与正文内容不能为空', 'warning', 3000);
+    }
     return;
   }
 
-  const payload = { title, slug, featured_image, content_raw, excerpt, status };
+  const payload = { title, slug, featured_image, content_raw, excerpt, status: targetStatus };
   const method = id ? 'PUT' : 'POST';
   const url = id ? '/api/posts/' + id : '/api/posts';
 
-  const res = await fetch(url, {
-    method,
-    headers: { 'Content-Type': 'application/json', 'X-Admin-Action': 'true' },
-    body: JSON.stringify(payload)
-  });
+  // UI elements
+  const statusTextEl = document.getElementById('editor-status-text');
+  const btnSaveDraft = document.getElementById('btn-save-draft');
+  const btnPublishPost = document.getElementById('btn-publish-post');
+  const btnMobileDraft = document.getElementById('btn-mobile-draft');
+  const btnMobilePublish = document.getElementById('btn-mobile-publish');
 
-  const data = await res.json();
-  if (res.ok) {
-    alert(status === 'published' ? '文章发布成功' : '已保存为草稿');
-    showTab('posts');
+  // 1. 开始保存 / 开始发布的动静提示
+  let toastHandle = null;
+
+  if (targetStatus === 'published') {
+    // 开始发布/更新中状态
+    if (btnPublishPost) {
+      btnPublishPost.disabled = true;
+      btnPublishPost.innerHTML = isAutoSave ? '⏳ 自动保存中...' : (id ? '🚀 正在更新...' : '🚀 正在发布...');
+    }
+    if (btnMobilePublish) {
+      btnMobilePublish.disabled = true;
+      btnMobilePublish.innerHTML = isAutoSave ? '⏳ 保存中...' : (id ? '🚀 更新中...' : '🚀 发布中...');
+    }
+    if (btnSaveDraft) btnSaveDraft.disabled = true;
+    if (btnMobileDraft) btnMobileDraft.disabled = true;
+
+    if (isAutoSave) {
+      if (statusTextEl) {
+        statusTextEl.innerHTML = '<span style="color:#38bdf8;">⏳ 正在自动同步已发布文章...</span>';
+      }
+    } else {
+      if (statusTextEl) {
+        statusTextEl.innerHTML = '<span style="color:#38bdf8; font-weight:600;">🚀 正在同步文章并刷新全网边缘缓存...</span>';
+      }
+      toastHandle = showToast('正在同步文章并刷新全网边缘缓存...', 'loading', 0);
+    }
   } else {
-    alert(data.error || '保存失败');
+    // 开始保存草稿中状态
+    if (!isAutoSave) {
+      if (btnSaveDraft) {
+        btnSaveDraft.disabled = true;
+        btnSaveDraft.innerHTML = '⏳ 正在保存...';
+      }
+      if (btnMobileDraft) {
+        btnMobileDraft.disabled = true;
+        btnMobileDraft.innerHTML = '⏳ 保存中...';
+      }
+      if (btnPublishPost) btnPublishPost.disabled = true;
+      if (btnMobilePublish) btnMobilePublish.disabled = true;
+
+      if (statusTextEl) {
+        statusTextEl.innerHTML = '<span style="color:#38bdf8;">⏳ 正在保存草稿...</span>';
+      }
+      toastHandle = showToast('正在保存文章草稿...', 'loading', 0);
+    } else {
+      if (statusTextEl) {
+        statusTextEl.innerHTML = '<span style="color:#38bdf8;">⏳ 正在自动保存草稿...</span>';
+      }
+    }
+  }
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'X-Admin-Action': 'true' },
+      body: JSON.stringify(payload)
+    });
+
+    const data = await res.json();
+    if (toastHandle) toastHandle.dismiss();
+
+    if (res.ok) {
+      // Record snapshot
+      lastSavedSnapshot = JSON.stringify({ title, slug, featured_image, excerpt, content_raw });
+      
+      // Update ID, slug and status
+      if (data.post) {
+        if (data.post.id) {
+          document.getElementById('edit-post-id').value = data.post.id;
+        }
+        if (data.post.slug && !slug) {
+          document.getElementById('post-slug').value = data.post.slug;
+        }
+        if (data.post.status) {
+          document.getElementById('edit-post-status').value = data.post.status;
+        }
+      } else {
+        document.getElementById('edit-post-status').value = targetStatus;
+      }
+      const headingEl = document.getElementById('editor-heading');
+      if (headingEl) {
+        headingEl.innerText = '编辑文章: ' + title;
+      }
+
+      const timeStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+
+      // 2. 保存完毕 / 发布完毕的动静提示
+      if (targetStatus === 'published') {
+        const isAlreadyPublished = currentPostStatus === 'published';
+        if (btnPublishPost) {
+          btnPublishPost.innerHTML = '✓ ' + (isAlreadyPublished ? '更新成功!' : '发布成功!');
+          btnPublishPost.style.background = '#059669';
+        }
+        if (btnMobilePublish) {
+          btnMobilePublish.innerHTML = '✓ ' + (isAlreadyPublished ? '更新成功!' : '发布成功!');
+        }
+
+        if (isAutoSave || stayInEditor) {
+          if (btnPublishPost) {
+            btnPublishPost.disabled = false;
+            btnPublishPost.innerHTML = '更新发布';
+            btnPublishPost.style.background = '';
+          }
+          if (btnMobilePublish) {
+            btnMobilePublish.disabled = false;
+            btnMobilePublish.innerHTML = '更新';
+          }
+          if (btnSaveDraft) {
+            btnSaveDraft.disabled = false;
+            btnSaveDraft.innerHTML = '转为草稿';
+          }
+          if (btnMobileDraft) {
+            btnMobileDraft.disabled = false;
+            btnMobileDraft.innerHTML = '转草稿';
+          }
+          if (statusTextEl) {
+            statusTextEl.innerHTML = '<span style="color:#10b981;">✓ ' + (isAutoSave ? '已自动保存更新于 ' : '已保存更新于 ') + timeStr + ' (已发布状态保持)</span>';
+          }
+          if (stayInEditor && !isAutoSave) {
+            showToast('✓ 文章已成功保存更新 (' + timeStr + ')', 'success', 2500);
+          }
+        } else {
+          // Explicit publish or update click -> show feedback and smoothly navigate back to posts list!
+          if (statusTextEl) {
+            statusTextEl.innerHTML = '<span style="color:#10b981; font-weight:600;">🎉 文章已成功发布并已刷新边缘缓存 (' + timeStr + ')</span>';
+          }
+
+          showToast('🎉 文章发布成功！正在前往文章列表...', 'success', 2000);
+
+          setTimeout(function() {
+            if (btnPublishPost) {
+              btnPublishPost.disabled = false;
+              btnPublishPost.innerHTML = '更新发布';
+              btnPublishPost.style.background = '';
+            }
+            if (btnMobilePublish) {
+              btnMobilePublish.disabled = false;
+              btnMobilePublish.innerHTML = '更新';
+            }
+            if (btnSaveDraft) {
+              btnSaveDraft.disabled = false;
+              btnSaveDraft.innerHTML = '转为草稿';
+            }
+            if (btnMobileDraft) {
+              btnMobileDraft.disabled = false;
+              btnMobileDraft.innerHTML = '转草稿';
+            }
+            showTab('posts');
+          }, 900);
+        }
+      } else {
+        // Draft or auto-save of draft: stay in editor!
+        if (btnSaveDraft) {
+          btnSaveDraft.disabled = false;
+          btnSaveDraft.innerHTML = '存为草稿';
+        }
+        if (btnMobileDraft) {
+          btnMobileDraft.disabled = false;
+          btnMobileDraft.innerHTML = '存草稿';
+        }
+        if (btnPublishPost) {
+          btnPublishPost.disabled = false;
+          btnPublishPost.innerHTML = '立即发布';
+          btnPublishPost.style.background = '';
+        }
+        if (btnMobilePublish) {
+          btnMobilePublish.disabled = false;
+          btnMobilePublish.innerHTML = '发布';
+        }
+
+        if (statusTextEl) {
+          statusTextEl.innerHTML = '<span style="color:#10b981;">✓ ' + (isAutoSave ? '已自动保存草稿于 ' : '草稿已保存于 ') + timeStr + '</span>';
+        }
+        if (!isAutoSave) {
+          showToast('✓ 文章草稿已成功保存 (' + timeStr + ')', 'success', 2500);
+        }
+      }
+    } else {
+      // 失败动静提示
+      const isPub = targetStatus === 'published';
+      if (btnPublishPost) {
+        btnPublishPost.disabled = false;
+        btnPublishPost.innerHTML = isPub ? '更新发布' : '立即发布';
+        btnPublishPost.style.background = '';
+      }
+      if (btnMobilePublish) {
+        btnMobilePublish.disabled = false;
+        btnMobilePublish.innerHTML = isPub ? '更新' : '发布';
+      }
+      if (btnSaveDraft) {
+        btnSaveDraft.disabled = false;
+        btnSaveDraft.innerHTML = isPub ? '转为草稿' : '存为草稿';
+      }
+      if (btnMobileDraft) {
+        btnMobileDraft.disabled = false;
+        btnMobileDraft.innerHTML = isPub ? '转草稿' : '存草稿';
+      }
+
+      if (isAutoSave) {
+        if (statusTextEl) {
+          statusTextEl.innerHTML = '<span style="color:#f59e0b;">⚠ 自动保存未成功 (' + escapeHtml(data.error || '未知错误') + ')</span>';
+        }
+      } else {
+        const actionLabel = isPub ? '发布文章' : '保存草稿';
+        if (statusTextEl) {
+          statusTextEl.innerHTML = '<span style="color:#ef4444;">✕ ' + actionLabel + '失败: ' + escapeHtml(data.error || '未知错误') + '</span>';
+        }
+        showToast('✕ ' + actionLabel + '失败: ' + (data.error || '未知错误'), 'error', 4000);
+      }
+    }
+  } catch (err) {
+    if (toastHandle) toastHandle.dismiss();
+
+    const isPub = targetStatus === 'published';
+    if (btnPublishPost) {
+      btnPublishPost.disabled = false;
+      btnPublishPost.innerHTML = isPub ? '更新发布' : '立即发布';
+      btnPublishPost.style.background = '';
+    }
+    if (btnMobilePublish) {
+      btnMobilePublish.disabled = false;
+      btnMobilePublish.innerHTML = isPub ? '更新' : '发布';
+    }
+    if (btnSaveDraft) {
+      btnSaveDraft.disabled = false;
+      btnSaveDraft.innerHTML = isPub ? '转为草稿' : '存为草稿';
+    }
+    if (btnMobileDraft) {
+      btnMobileDraft.disabled = false;
+      btnMobileDraft.innerHTML = isPub ? '转草稿' : '存草稿';
+    }
+
+    const actionLabel = isPub ? '发布文章' : '保存草稿';
+    if (isAutoSave) {
+      if (statusTextEl) {
+        statusTextEl.innerHTML = '<span style="color:#ef4444;">⚠ 自动保存网络错误</span>';
+      }
+    } else {
+      if (statusTextEl) {
+        statusTextEl.innerHTML = '<span style="color:#ef4444;">✕ ' + actionLabel + '网络异常，请重试</span>';
+      }
+      showToast('✕ ' + actionLabel + '网络异常，请检查连接后重试', 'error', 4000);
+    }
   }
 }
 
@@ -2832,7 +3518,7 @@ async function loadMedia() {
       '<td><strong>' + escapeHtml(m.filename) + '</strong></td>' +
       '<td>' + escapeHtml(m.mime_type) + '</td>' +
       '<td>' + (m.size / 1024).toFixed(1) + ' KB</td>' +
-      '<td><a href="/media/' + encodeURIComponent(m.r2_key) + '" target="_blank" style="font-family:monospace; font-size:12px;">/media/' + escapeHtml(m.r2_key) + '</a></td>' +
+      '<td><a href="/media/' + m.r2_key.split('/').map(encodeURIComponent).join('/') + '" target="_blank" style="font-family:monospace; font-size:12px;">/media/' + escapeHtml(m.r2_key) + '</a></td>' +
       '<td>' + (m.created_at ? m.created_at.slice(0, 10) : '') + '</td>' +
       '</tr>';
   }).join('');

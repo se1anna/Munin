@@ -55,6 +55,11 @@ export function renderFullHtmlPage(ctx: PageRenderContext): string {
 
   <!-- Theme Stylesheet -->
   <style>
+  /* Universal Responsive Media Safeguards */
+  img { max-width: 100%; height: auto; }
+  figure { margin: 0; }
+  .wp-block-image img, figure.wp-block-image img { max-width: 100% !important; height: auto !important; }
+
 ${themeCss}
   </style>
 

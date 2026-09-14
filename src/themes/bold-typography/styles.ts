@@ -445,6 +445,39 @@ a {
   margin-top: 1.8em;
 }
 
+/* Images & Media */
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+figure {
+  margin: 0;
+}
+
+.wp-block-image, figure.wp-block-image {
+  margin: 36px auto;
+  text-align: center;
+  max-width: 100%;
+}
+
+.wp-block-image img, figure.wp-block-image img, .bt-post-content img {
+  max-width: 100% !important;
+  height: auto !important;
+  display: block;
+  margin: 0 auto;
+  border: 1px solid var(--bt-border);
+}
+
+.wp-block-image figcaption, figure.wp-block-image figcaption {
+  margin-top: 12px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--bt-muted-fg);
+  text-align: center;
+  letter-spacing: 0.05em;
+}
+
 /* Gutenberg Quotes with Playfair Serif */
 blockquote, .wp-block-quote, .wp-block-pullquote {
   font-family: var(--font-display);
