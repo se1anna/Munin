@@ -11,10 +11,14 @@ export interface RateLimitOptions {
 
 // In-memory fallback sliding window cache for local/fast edge hits
 const memoryWindowCache = new Map<string, { count: number; resetAt: number }>();
+const MEMORY_WINDOW_MAX_KEYS = 10000;
 
 export function getClientIp(c: Context<HonoEnv>): string {
+  // ⚠️ SECURITY: CF-Connecting-IP is set by Cloudflare and cannot be spoofed.
+  // X-Forwarded-For is client-supplied, so it is only a fallback for local/dev runs.
   return (
     c.req.header("CF-Connecting-IP") ||
+    c.req.header("X-Real-IP") ||
     c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ||
     "127.0.0.1"
   );
@@ -48,6 +52,8 @@ export async function checkRateLimit(
       }
 
       if (currentCount >= limit) {
+        // Blocked requests must NOT extend the window, otherwise an attacker
+        // can keep a victim locked out forever by replaying the request.
         return {
           allowed: false,
           remaining: 0,
@@ -56,10 +62,11 @@ export async function checkRateLimit(
       }
 
       const newCount = currentCount + 1;
+      const remainingTtl = Math.max(1, expiry - now);
       await c.env.CACHE_KV.put(
         cacheKey,
         JSON.stringify({ count: newCount, expiry }),
-        { expirationTtl: windowSeconds }
+        { expirationTtl: Math.min(windowSeconds, remainingTtl) }
       );
 
       return {
@@ -88,6 +95,17 @@ export async function checkRateLimit(
       remaining: Math.max(0, limit - record.count),
       resetIn: record.resetAt - now
     };
+  }
+
+  // Drop the expired entry (and cap growth) so this map cannot grow without bound
+  memoryWindowCache.delete(cacheKey);
+  if (memoryWindowCache.size >= MEMORY_WINDOW_MAX_KEYS) {
+    for (const [key, entry] of memoryWindowCache) {
+      if (entry.resetAt <= now) memoryWindowCache.delete(key);
+    }
+    if (memoryWindowCache.size >= MEMORY_WINDOW_MAX_KEYS) {
+      memoryWindowCache.clear();
+    }
   }
 
   memoryWindowCache.set(cacheKey, {

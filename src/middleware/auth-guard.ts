@@ -34,7 +34,9 @@ export async function isTokenVersionValid(c: Context<HonoEnv>, userId: string, t
       const cachedVerStr = await c.env.CACHE_KV.get(kvKey);
       if (cachedVerStr !== null) {
         const cachedVer = parseInt(cachedVerStr, 10);
-        return tokenVer >= cachedVer;
+        // ⚠️ SECURITY: exact match only. `>=` would let a forged token claim a huge
+        // version number and survive every password-change revocation.
+        return tokenVer === cachedVer;
       }
     } catch {
       // ignore
@@ -62,7 +64,8 @@ export async function isTokenVersionValid(c: Context<HonoEnv>, userId: string, t
           c.env.CACHE_KV.put(kvKey, String(dbVer), { expirationTtl: 86400 * 7 }).catch(() => {});
         }
       }
-      return tokenVer >= (dbVer || 1);
+      // Deleted users report version 0, so no previously issued token can ever match.
+      return tokenVer === (dbVer ?? 0);
     } catch {
       return false; // ⚠️ SECURITY: Fail-closed: if DO is unreachable, reject token
     }
