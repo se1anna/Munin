@@ -236,14 +236,20 @@ oauthRoutes.post(
       return c.json({ error: "invalid_client", error_description: "客户端未找到" }, 400);
     }
 
-    // Verify confidential client secret or public PKCE verifier
+    // Verify confidential client secret AND/OR public PKCE verifier.
+    // ⚠️ SECURITY: every credential the client actually presents must validate —
+    // a bad secret can never be rescued by an accompanying PKCE verifier.
+    let authenticated = false;
+
     if (clientSecret) {
       const isSecretValid = await verifyPassword(clientSecret, client.client_secret_hash);
       if (!isSecretValid) {
         return c.json({ error: "invalid_client", error_description: "客户端密钥错误" }, 401);
       }
-    } else if (codeData.code_challenge) {
-      // PKCE Verification
+      authenticated = true;
+    }
+
+    if (codeData.code_challenge) {
       if (!codeVerifier) {
         return c.json({ error: "invalid_request", error_description: "缺少 PKCE code_verifier" }, 400);
       }
@@ -257,7 +263,10 @@ oauthRoutes.post(
           return c.json({ error: "invalid_grant", error_description: "PKCE code_verifier 校验未通过" }, 400);
         }
       }
-    } else if (!client.is_trusted) {
+      authenticated = true;
+    }
+
+    if (!authenticated && !client.is_trusted) {
       return c.json({ error: "invalid_client", error_description: "该客户端需要提供 client_secret" }, 401);
     }
 
@@ -347,44 +356,6 @@ oauthRoutes.post(
 
 // 4. OIDC UserInfo Endpoint
 oauthRoutes.get("/userinfo", async (c) => {
-  const token = extractToken(c);
-  if (!token) {
-    return c.json({ error: "invalid_token", error_description: "缺少 Bearer 访问令牌" }, 401);
-  }
-
-  const secret = c.env.JWT_SECRET;
-  if (!secret) {
-    return c.json({ error: "invalid_token", error_description: "JWT 签名密钥未配置" }, 500);
-  }
-  const authUser = await verifyJWT(token, secret);
-  if (!authUser) {
-    return c.json({ error: "invalid_token", error_description: "访问令牌无效或已过期" }, 401);
-  }
-
-  const isValid = await isTokenVersionValid(c, authUser.id, authUser.token_version);
-  if (!isValid) {
-    return c.json({ error: "invalid_token", error_description: "该用户的会话已被注销，请重新授权" }, 401);
-  }
-
-  const blogDO = getBlogDOStub(c);
-  const user = await (blogDO as any).getUserById(authUser.id);
-  if (!user) {
-    return c.json({ error: "invalid_token", error_description: "用户不存在" }, 404);
-  }
-
-  return c.json({
-    sub: user.id,
-    id: user.id,
-    name: user.display_name,
-    preferred_username: user.username,
-    email: user.email,
-    email_verified: true,
-    role: user.role,
-    display_name: user.display_name
-  });
-});
-
-oauthRoutes.post("/userinfo", async (c) => {
   const token = extractToken(c);
   if (!token) {
     return c.json({ error: "invalid_token", error_description: "缺少 Bearer 访问令牌" }, 401);
@@ -605,7 +576,9 @@ oauthRoutes.get("/login", (c) => {
         if (res.ok) {
           msg.style.color = '#10b981';
           msg.innerText = '登录成功，正在跳转...';
-          const returnTo = ${JSON.stringify(returnTo)};
+          // ⚠️ SECURITY: JSON.stringify does not escape "</", so a crafted return_to
+          // could close the inline <script> element and inject markup.
+          const returnTo = ${JSON.stringify(returnTo).replace(/</g, "\\u003c")};
           window.location.href = returnTo;
         } else {
           msg.style.color = '#ef4444';
