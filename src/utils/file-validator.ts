@@ -2,6 +2,8 @@ export interface FileValidationResult {
   valid: boolean;
   error?: string;
   detectedMime?: string;
+  /** Present when the payload had to be rewritten (SVG script stripping). */
+  sanitizedBuffer?: ArrayBuffer;
 }
 
 const ALLOWED_MIME_TYPES = new Set([
@@ -12,6 +14,24 @@ const ALLOWED_MIME_TYPES = new Set([
   "image/svg+xml",
   "application/pdf"
 ]);
+
+const SVG_SCRIPT_BLOCK = /<script[\s\S]*?<\/script\s*>/gi;
+const SVG_FOREIGN_BLOCK = /<(iframe|foreignObject|use|animate|set|handler)\b[\s\S]*?<\/\1\s*>/gi;
+const SVG_EVENT_ATTR = /\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi;
+const SVG_DANGEROUS_URL = /(?:javascript|vbscript|data)\s*:/gi;
+
+/**
+ * Removes active content from an SVG payload. The upload filter must look at the
+ * whole document, not just the leading bytes, because SVG elements can be placed
+ * arbitrarily far into the file.
+ */
+export function stripSvgActiveContent(svgText: string): string {
+  return svgText
+    .replace(SVG_SCRIPT_BLOCK, "")
+    .replace(SVG_FOREIGN_BLOCK, "")
+    .replace(SVG_EVENT_ATTR, "")
+    .replace(SVG_DANGEROUS_URL, "blocked:");
+}
 
 export function validateFileSignature(
   buffer: ArrayBuffer,
@@ -83,24 +103,44 @@ export function validateFileSignature(
 
   // 6. SVG check: text xml containing <svg and not containing script tags
   if (declaredMimeType === "image/svg+xml") {
+    let text: string;
     try {
-      const text = new TextDecoder().decode(buffer.slice(0, Math.min(buffer.byteLength, 4096)));
-      if (text.includes("<svg") || text.includes("<?xml")) {
-        // XSS defense in SVG: block embedded scripts and dangerous handlers
-        const lower = text.toLowerCase();
-        if (
-          lower.includes("<script") ||
-          lower.includes("javascript:") ||
-          lower.includes("onload=") ||
-          lower.includes("onerror=")
-        ) {
-          return { valid: false, error: "SVG 文件包含潜在危险的脚本内容，已被安全拦截" };
-        }
-        return { valid: true, detectedMime: "image/svg+xml" };
-      }
+      text = new TextDecoder().decode(buffer);
     } catch {
-      // Decode failed
+      return { valid: false, error: "SVG 文件解码失败，无法完成安全校验" };
     }
+
+    if (!text.includes("<svg") && !text.includes("<?xml")) {
+      return {
+        valid: false,
+        error: "不支持的文件类型或文件头魔数校验失败，仅支持 JPG/PNG/GIF/WebP/PDF/安全SVG"
+      };
+    }
+
+    // ⚠️ SECURITY: scan the whole document — a leading-bytes-only check is trivially
+    // bypassed by padding the payload before the <script> tag.
+    const lower = text.toLowerCase();
+    const hasActiveContent =
+      lower.includes("<script") ||
+      lower.includes("javascript:") ||
+      lower.includes("onload=") ||
+      lower.includes("onerror=");
+
+    if (hasActiveContent) {
+      const cleaned = stripSvgActiveContent(text);
+      const cleanedLower = cleaned.toLowerCase();
+      // Only accept the rewrite when no executable markup survives it.
+      if (cleanedLower.includes("<script") || cleanedLower.includes("javascript:")) {
+        return { valid: false, error: "SVG 文件包含潜在危险的脚本内容，已被安全拦截" };
+      }
+      return {
+        valid: true,
+        detectedMime: "image/svg+xml",
+        sanitizedBuffer: new TextEncoder().encode(cleaned).buffer as ArrayBuffer
+      };
+    }
+
+    return { valid: true, detectedMime: "image/svg+xml" };
   }
 
   return {

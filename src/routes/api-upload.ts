@@ -6,12 +6,33 @@ import { validateFileSignature } from "../utils/file-validator";
 
 export const apiUploadRoutes = new Hono<HonoEnv>();
 
+// Canonical extension per detected MIME type
+const MIME_EXTENSIONS: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/svg+xml": "svg",
+  "application/pdf": "pdf"
+};
+
 function getBlogDOStub(c: any) {
   const id = c.env.BLOG_DO.idFromName("global-blog-instance");
   return c.env.BLOG_DO.get(id);
 }
 
-// Media Upload to R2 Bucket (with per-user rate limiting and magic byte validation)
+// 1. List Media (for authors and admins)
+apiUploadRoutes.get("/", requireAuth, async (c) => {
+  const user = c.get("user")!;
+  if (user.role !== "administrator" && user.role !== "author") {
+    return c.json({ error: "权限不足，仅作者或管理员可查看媒体库" }, 403);
+  }
+  const blogDO = getBlogDOStub(c);
+  const media = await (blogDO as any).listMedia();
+  return c.json({ media });
+});
+
+// 2. Media Upload to R2 Bucket (with per-user rate limiting and magic byte validation)
 apiUploadRoutes.post(
   "/",
   requireAuth,
@@ -28,12 +49,20 @@ apiUploadRoutes.post(
       return c.json({ error: "权限不足，仅作者或管理员可上传媒体文件" }, 403);
     }
 
-    const formData = await c.req.formData();
-    const file = formData.get("file") as File | null;
+    let formData: FormData;
+    try {
+      formData = await c.req.formData();
+    } catch {
+      return c.json({ error: "请求格式错误，请使用 multipart/form-data 上传文件" }, 400);
+    }
 
-    if (!file) {
+    const fileEntry: any = formData.get("file");
+    // A plain text field named "file" yields a string, which would throw later on.
+    if (!fileEntry || typeof fileEntry === "string" || typeof fileEntry.arrayBuffer !== "function") {
       return c.json({ error: "请提供待上传的文件" }, 400);
     }
+
+    const file = fileEntry as File;
 
     const rawFilename = file.name || "upload.bin";
     const declaredMimeType = file.type || "application/octet-stream";
@@ -59,15 +88,18 @@ apiUploadRoutes.post(
       .replace(/[^\w\u4e00-\u9fa5.-]/g, "_")
       .slice(0, 100);
 
-    const ext = safeFilename.includes(".")
-      ? safeFilename.split(".").pop()!.toLowerCase()
-      : "bin";
+    // ⚠️ SECURITY: the stored extension follows the detected MIME type, so a caller
+    // cannot name an image "x.html" and have it served as HTML from this origin.
+    const ext = MIME_EXTENSIONS[finalMimeType] || "bin";
 
     const uuid = crypto.randomUUID();
     const r2Key = `uploads/${uuid}.${ext}`;
 
+    // Store the sanitized payload when the validator rewrote it (SVG script stripping)
+    const payload = validation.sanitizedBuffer || arrayBuffer;
+
     // Write to R2 Bucket
-    await c.env.MY_BUCKET.put(r2Key, arrayBuffer, {
+    await c.env.MY_BUCKET.put(r2Key, payload, {
       httpMetadata: {
         contentType: finalMimeType,
         cacheControl: "public, max-age=31536000, immutable"
@@ -83,7 +115,8 @@ apiUploadRoutes.post(
     const mediaMeta = await (blogDO as any).recordMediaUpload({
       filename: safeFilename,
       mime_type: finalMimeType,
-      size,
+      // Sanitized payloads differ in size from the uploaded file
+      size: payload.byteLength,
       r2_key: r2Key,
       uploader_id: user.id
     });
