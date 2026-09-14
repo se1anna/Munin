@@ -36,7 +36,9 @@ export function hasTheme(id: string): boolean {
  * Gets a theme package by ID, with safe automatic fallback to default theme
  */
 export function getThemePackage(id?: string): ThemePackage {
-  if (id && THEME_REGISTRY[id]) {
+  // ⚠️ SECURITY: hasOwnProperty, because THEME_REGISTRY["constructor"] (or any other
+  // inherited key) would otherwise return a non-theme value and crash every render.
+  if (id && Object.prototype.hasOwnProperty.call(THEME_REGISTRY, id)) {
     return THEME_REGISTRY[id];
   }
   return THEME_REGISTRY[DEFAULT_THEME_ID] || defaultDarkTheme;
