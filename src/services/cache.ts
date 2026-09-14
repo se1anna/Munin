@@ -98,7 +98,12 @@ export async function invalidateCacheKeys(kv: KVNamespace, keys: string[]): Prom
   }
 }
 
-export async function invalidatePostAndFeeds(kv: KVNamespace, slug?: string): Promise<void> {
+export async function invalidatePostAndFeeds(
+  kv: KVNamespace,
+  slug?: string,
+  categorySlugs?: string[],
+  tagSlugs?: string[]
+): Promise<void> {
   const keys: string[] = [
     getFeedRssCacheKey(),
     getSitemapCacheKey(),
@@ -110,6 +115,20 @@ export async function invalidatePostAndFeeds(kv: KVNamespace, slug?: string): Pr
   if (slug) {
     keys.push(getPostCacheKey(slug));
     keys.push(getPost404CacheKey(slug));
+  }
+  if (categorySlugs && categorySlugs.length > 0) {
+    for (const cat of categorySlugs) {
+      for (let i = 1; i <= 5; i++) {
+        keys.push(getCategoryCacheKey(cat, i));
+      }
+    }
+  }
+  if (tagSlugs && tagSlugs.length > 0) {
+    for (const tag of tagSlugs) {
+      for (let i = 1; i <= 5; i++) {
+        keys.push(getTagCacheKey(tag, i));
+      }
+    }
   }
   await invalidateCacheKeys(kv, keys);
 }
