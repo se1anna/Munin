@@ -22,6 +22,8 @@ docs/
 # Configuration, Secrets, and Environment Variables
 .env
 .env.*
+.envrc
+*.env
 .dev.vars
 .dev.vars.*
 *.local
@@ -31,10 +33,52 @@ docs/
 *.crt
 *.p12
 *.pfx
-hotp-keys*.txt
-*backup*.json
+*.keystore
+*.jks
+*.kdbx
+id_rsa*
+id_ed25519*
+id_ecdsa*
+id_dsa*
+secrets.*
+*.secret
+*.secrets
+*.token
+*.tokens
+credentials.*
+*.credentials
 service-account*.json
+hotp-keys*.txt
+
+# Cloudflare Configuration
+wrangler.toml
+wrangler.json
 wrangler.jsonc
+wrangler.*.toml
+wrangler.*.json
+wrangler.*.jsonc
+!wrangler.jsonc.example
+!wrangler.json.example
+!wrangler.toml.example
+
+# Backups, Archives, and Dumps
+*backup*.json
+*export*.json
+*.bak
+*.backup
+*.old
+*.orig
+*.dump
+*.sql
+*.sql.gz
+*.tar
+*.tar.gz
+*.zip
+*.7z
+
+# Logs
+*.log
+wrangler-*.log
 
 # Virtual Cloudflare Environments, Local SQLite & Storage
 .wrangler/
